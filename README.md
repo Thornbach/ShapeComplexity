@@ -1,6 +1,6 @@
 # ShapeComplexity v0.5
 
-**A powerful tool for analyzing leaf edge and margin complexity from PNG images**
+**A powerful tool for analyzing leaf edge and macro-shape complexity from PNG images**
 
 ShapeComplexity provides both command-line and graphical interfaces for comprehensive leaf morphology analysis, measuring edge complexity (EC) and macro-shape complexity (MC) through advanced image processing algorithms.
 
