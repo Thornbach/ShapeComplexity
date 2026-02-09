@@ -33,8 +33,7 @@ ShapeComplexity provides both command-line and graphical interfaces for comprehe
 ### Windows (Portable - No Installation Required)
 
 **Download the latest release:**
-- **GUI Version**: [LeafComplexR-GUI-v0.5-Windows.zip](https://github.com/YOUR_USERNAME/leaf_complex_rust/releases/download/v0.5/LeafComplexR-GUI-v0.5-Windows.zip)
-- **CLI Version**: [LeafComplexR-CLI-v0.5-Windows.zip](https://github.com/YOUR_USERNAME/leaf_complex_rust/releases/download/v0.5/LeafComplexR-CLI-v0.5-Windows.zip)
+- **GUI Version**: [LeafComplexR-GUI-v0.5-Windows.zip](https://github.com/Thornbach/ShapeComplexity/releases/download/v0.5/leaf_complex_gui.exe)
 
 Simply extract and double-click the `.exe` file to start!
 
