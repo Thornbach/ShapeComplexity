@@ -37,7 +37,6 @@ ShapeComplexity provides both command-line and graphical interfaces for comprehe
 
 Simply extract and double-click the `.exe` file to start!
 
-For detailed installation instructions and other platforms, see **[INSTALLATION.md](INSTALLATION.md)**.
 
 ---
 
@@ -50,19 +49,6 @@ For detailed installation instructions and other platforms, see **[INSTALLATION.
 4. Select images and click **Analyze**
 5. Export results via **File → Export Selected Analysis**
 
-### CLI Tool
-```bash
-# Analyze a single image
-leaf_complex_rust_cli.exe -i input/leaf.png -o output/
-
-# Batch process a directory
-leaf_complex_rust_cli.exe -i input_folder/ -o output/
-
-# Use custom configuration
-leaf_complex_rust_cli.exe -i input/ -o output/ -c my_config.toml
-```
-
-For detailed usage instructions, see **[USAGE.md](USAGE.md)**.
 
 ---
 
@@ -113,8 +99,7 @@ See [config.toml](config.toml) for full documentation of all parameters.
 
 ## 📚 Documentation
 
-- **[INSTALLATION.md](INSTALLATION.md)** - Detailed installation guide for all platforms
-- **[USAGE.md](USAGE.md)** - Complete usage documentation for GUI and CLI
+
 - **[config.toml](config.toml)** - Parameter reference with explanations
 
 ---
