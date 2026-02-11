@@ -124,12 +124,14 @@ See [config.toml](config.toml) for full documentation of all parameters.
 
 ##  Building from Source
 
+If youre on Linux or MacOS you may build the tool from source
+
 ```bash
 # Install Rust (https://rustup.rs/)
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 # Clone repository
-git clone https://github.com/YOUR_USERNAME/leaf_complex_rust.git
+git clone https://github.com/Thornbach/leaf_complex_rust.git
 cd leaf_complex_rust
 
 # Build CLI
