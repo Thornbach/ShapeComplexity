@@ -3,7 +3,7 @@ name = "leaf_complex_gui"
 version = "1.0.0"
 edition = "2021"
 authors = ["Tobias Müller <tobimu@proton.me>"]
-description = "Interactive GUI for LeafComplexR - Leaf Edge and Margin Complexity Analysis"
+description = "Interactive GUI for ShapeComplexity - Edge and Macro-shape Complexity Analysis"
 
 [dependencies]
 # Backend library (backend crate lives in parent directory; package name is `leaf_complex_rust`)
