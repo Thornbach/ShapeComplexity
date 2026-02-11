@@ -23,7 +23,7 @@ fn main() -> Result<(), eframe::Error> {
     };
 
     eframe::run_native(
-        "LeafComplexR - Interactive Leaf Analysis",
+        "ShapeComplexity",
         options,
         Box::new(|cc| {
             // Set custom fonts and style
