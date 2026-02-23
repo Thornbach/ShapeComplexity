@@ -1,1 +1,5 @@
-target/
+/target/
+/leaf_complex_gui/target/
+**/*.rs.bk
+.DS_Store
+Thumbs.db

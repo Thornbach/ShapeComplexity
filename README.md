@@ -184,3 +184,4 @@ Special thanks to contributors and the Rust community for excellent image proces
 **Version:** 0.5  
 **Last Updated:** January 2026  
 **Status:** Stable Release
+
