@@ -227,6 +227,89 @@ pub fn apply_opening(
     Ok(dilated)
 }
 
+/// Fast morphological opening — byte-for-byte identical result to `apply_opening`
+/// (disk erosion → dilation, original RGB preserved, opened alpha) but:
+///   • iterates only the disk's TRUE pixels (an offset list), not the k×k box,
+///   • reads the raw RGBA buffer instead of per-pixel `get_pixel`,
+///   • runs erosion + dilation in parallel (rayon).
+/// The naive version is O(W·H·k²) single-threaded with a content-adaptive kernel
+/// that can reach ~77 px → seconds/leaf; this is the same work parallel + raw.
+pub fn apply_opening_fast(image: &RgbaImage, kernel_size: u32) -> Result<RgbaImage> {
+    use rayon::prelude::*;
+    if kernel_size == 0 {
+        return Err(LeafComplexError::Morphology(
+            "Kernel size must be greater than 0".to_string(),
+        ));
+    }
+    let kernel = create_circular_kernel(kernel_size);
+    let (k_width, k_height) = kernel.dimensions();
+    let k_radius_x = (k_width / 2) as i32;
+    let k_radius_y = (k_height / 2) as i32;
+    // Disk offsets (relative to centre) — only the pixels actually in the kernel.
+    let mut offsets: Vec<(i32, i32)> = Vec::new();
+    for ky in 0..k_height {
+        for kx in 0..k_width {
+            if kernel.get_pixel(kx, ky)[0] > 0 {
+                offsets.push((kx as i32 - k_radius_x, ky as i32 - k_radius_y));
+            }
+        }
+    }
+
+    let (width, height) = image.dimensions();
+    let (w, h, wu) = (width as i32, height as i32, width as usize);
+    let raw = image.as_raw();
+    let n = (width * height) as usize;
+    let is_leaf: Vec<bool> = (0..n).map(|i| raw[i * 4 + 3] >= ALPHA_THRESHOLD).collect();
+
+    // ── Erosion: a leaf pixel erodes if any disk offset is OOB or background ──
+    let mut eroded_alpha = vec![0u8; n];
+    eroded_alpha.par_iter_mut().enumerate().for_each(|(i, out)| {
+        let a = raw[i * 4 + 3];
+        if a < ALPHA_THRESHOLD {
+            *out = a; // background stays as-is
+            return;
+        }
+        let (x, y) = ((i % wu) as i32, (i / wu) as i32);
+        let mut erode = false;
+        for &(dx, dy) in &offsets {
+            let (nx, ny) = (x + dx, y + dy);
+            if nx < 0 || ny < 0 || nx >= w || ny >= h {
+                erode = true;
+                break;
+            }
+            if !is_leaf[ny as usize * wu + nx as usize] {
+                erode = true;
+                break;
+            }
+        }
+        *out = if erode { 0 } else { a };
+    });
+    let eroded_leaf: Vec<bool> = eroded_alpha.iter().map(|&a| a >= ALPHA_THRESHOLD).collect();
+
+    // ── Dilation: a pixel is set if any disk offset lands on the eroded leaf ──
+    let mut final_alpha = vec![0u8; n];
+    final_alpha.par_iter_mut().enumerate().for_each(|(i, out)| {
+        let (x, y) = ((i % wu) as i32, (i / wu) as i32);
+        let mut dilate = false;
+        for &(dx, dy) in &offsets {
+            let (nx, ny) = (x + dx, y + dy);
+            if nx >= 0 && ny >= 0 && nx < w && ny < h && eroded_leaf[ny as usize * wu + nx as usize] {
+                dilate = true;
+                break;
+            }
+        }
+        *out = if dilate { eroded_alpha[i].max(1) } else { eroded_alpha[i] };
+    });
+
+    // Rebuild: original RGB, opened alpha (matches apply_opening exactly).
+    let mut buf = raw.clone();
+    for i in 0..n {
+        buf[i * 4 + 3] = final_alpha[i];
+    }
+    RgbaImage::from_raw(width, height, buf)
+        .ok_or_else(|| LeafComplexError::Morphology("opening rebuild failed".to_string()))
+}
+
 pub fn mark_opened_regions(
     original: &RgbaImage, 
     opened: &RgbaImage, 
@@ -267,8 +350,8 @@ pub fn create_thornfiddle_image(
     println!("Creating Thornfiddle image with DYNAMIC kernel size: {} pixels (based on LMC SHORTER dimension)", 
              aggressive_size);
     
-    // Apply aggressive opening to LMC image
-    let aggressively_opened = apply_opening(lmc_image, aggressive_size)?;
+    // Apply aggressive opening to LMC image (fast parallel path — identical result)
+    let aggressively_opened = apply_opening_fast(lmc_image, aggressive_size)?;
     
     // Create Thornfiddle image: LMC base + golden overlays for removed regions
     let mut thornfiddle_image = lmc_image.clone();
@@ -624,6 +707,57 @@ static MOORE_NEIGHBORHOOD: [(i32, i32); 8] = [
 ];
 
 /// Trace the contour of a region using Moore-Neighbor tracing algorithm
+/// Keep only the largest connected component of non-transparent pixels; zero the
+/// alpha of everything else. Resizing a non-square cutout to 512² leaves faint
+/// disconnected specks (anti-aliasing / segmentation crumbs); the EC contour trace
+/// starts at the leftmost boundary pixel, which can be one of those specks — it then
+/// traces the tiny blob (~6 points) and stops, never reaching the leaf. This removes
+/// the specks so EC traces the real leaf. (The MC path already does the equivalent
+/// via its centre-of-mass component.) No-op for a clean single-component leaf.
+pub fn keep_largest_alpha_component(image: &mut RgbaImage) {
+    let (width, height) = image.dimensions();
+    let (w, h, wu) = (width as i32, height as i32, width as usize);
+    let n = (width * height) as usize;
+    let solid: Vec<bool> = image.as_raw().chunks_exact(4).map(|p| p[3] > 0).collect();
+
+    let mut label = vec![0u32; n];
+    let dirs: [(i32, i32); 8] =
+        [(1, 0), (-1, 0), (0, 1), (0, -1), (1, 1), (1, -1), (-1, 1), (-1, -1)];
+    let mut cur = 0u32;
+    let (mut best_label, mut best_size) = (0u32, 0usize);
+    let mut stack: Vec<usize> = Vec::new();
+    for start in 0..n {
+        if !solid[start] || label[start] != 0 { continue; }
+        cur += 1;
+        label[start] = cur;
+        stack.push(start);
+        let mut size = 0usize;
+        while let Some(p) = stack.pop() {
+            size += 1;
+            let (px, py) = ((p % wu) as i32, (p / wu) as i32);
+            for &(dx, dy) in &dirs {
+                let (nx, ny) = (px + dx, py + dy);
+                if nx < 0 || ny < 0 || nx >= w || ny >= h { continue; }
+                let nidx = ny as usize * wu + nx as usize;
+                if solid[nidx] && label[nidx] == 0 {
+                    label[nidx] = cur;
+                    stack.push(nidx);
+                }
+            }
+        }
+        if size > best_size { best_size = size; best_label = cur; }
+    }
+    if best_label == 0 { return; }
+    for i in 0..n {
+        if label[i] != best_label && solid[i] {
+            let (x, y) = ((i % wu) as u32, (i / wu) as u32);
+            let mut px = *image.get_pixel(x, y);
+            px[3] = 0;
+            image.put_pixel(x, y, px);
+        }
+    }
+}
+
 pub fn trace_contour(image: &RgbaImage, is_pink_opaque: bool, pink_color: [u8; 3]) -> Vec<(u32, u32)> {
     use std::collections::HashSet;
     

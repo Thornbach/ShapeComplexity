@@ -2,12 +2,14 @@
 name = "leaf_complex_gui"
 version = "1.0.0"
 edition = "2021"
-authors = ["Tobias Müller <tobimu@proton.me>"]
+authors = ["Tobias Trauden <ToTrauden@proton.me>"]
 description = "Interactive GUI for ShapeComplexity - Edge and Macro-shape Complexity Analysis"
+license = "MIT"
+repository = "https://github.com/Thornbach/ShapeComplexity"
 
 [dependencies]
-# Backend library (backend crate lives in parent directory; package name is `leaf_complex_rust`)
-leaf_complex_rust_lib = { path = "..", package = "leaf_complex_rust" }
+# Backend library (backend crate lives in the parent directory)
+shapecomplexity = { path = ".." }
 
 # GUI framework
 eframe = "0.29"

@@ -5,7 +5,7 @@ use eframe::egui;
 // FIX: Config comes from the GUI-local crate::config (same type the rest of the app uses).
 //      Analysis functions are still pulled from the library crate.
 use crate::config::Config;
-use leaf_complex_rust_lib::{
+use shapecomplexity::{
     morphology, shape_analysis, point_analysis,
     feature_extraction, thornfiddle, load_image,
 };
@@ -277,7 +277,7 @@ impl AnalysisEngine {
 
         let (mc_features, _mc_petiole_info) = thornfiddle::filter_petiole_from_ec_features(
             &initial_mc_features,
-            config.enable_petiole_filter_ec,
+            config.enable_petiole_filter_mc,
             config.petiole_remove_completely,
             1.0,
             false,

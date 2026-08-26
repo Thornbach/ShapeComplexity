@@ -260,9 +260,10 @@ impl LeafComplexApp {
                     println!("Thread {} started", thread_id);
                     let engine = AnalysisEngine::new();
 
-                    // Lock Arc<Mutex<crate::config::Config>> — deref with &* below
-
-                    let config_guard = config.lock().unwrap();
+                    // Clone Config once and release the lock immediately so all
+                    // threads can proceed concurrently.  Holding the lock across
+                    // the work loop serialised all threads onto Thread 0.
+                    let config_owned = config.lock().unwrap().clone();
 
                     let mut processed = 0;
                     loop {
@@ -277,8 +278,7 @@ impl LeafComplexApp {
                                 println!("Thread {}: Processing {} - {:?}",
                                     thread_id, processed, path.file_name().unwrap_or_default());
 
-                                // &*config_guard: MutexGuard<Config> → &crate::config::Config
-                                let result = engine.analyze_image(&path, &*config_guard, &ctx);
+                                let result = engine.analyze_image(&path, &config_owned, &ctx);
 
                                 if tx.send((path.clone(), result)).is_err() {
                                     eprintln!("Thread {}: Failed to send result", thread_id);
@@ -293,8 +293,6 @@ impl LeafComplexApp {
                             }
                         }
                     }
-
-                    drop(config_guard);
                 });
 
                 handles.push(handle);
@@ -347,7 +345,8 @@ impl LeafComplexApp {
         // ── 1. Snapshot pre-built CSV strings + summary (no GPU texture clones) ─
         // ec_csv / mc_csv are built once at analysis time and stored as Strings.
         // Cloning them here is just a memcpy of ~20–50 KB per image — very cheap.
-        let export_data: Vec<(String, String, String, SummaryStats)> = {
+        // img.path is also captured so we can compute Subfolder/Path columns.
+        let (export_data, workspace_dir): (Vec<(String, std::path::PathBuf, String, String, SummaryStats)>, Option<std::path::PathBuf>) = {
             let state_guard = self.state.lock().unwrap();
             let selected = state_guard.get_selected_images();
 
@@ -355,7 +354,7 @@ impl LeafComplexApp {
             let filter_by_selection = !selected_set.is_empty();
 
             let mut seen = std::collections::HashSet::new();
-            state_guard.images.iter()
+            let data = state_guard.images.iter()
                 .filter(|img| {
                     let in_selection = !filter_by_selection || selected_set.contains(&img.path);
                     let has_result = state_guard.analysis_results.contains_key(&img.path);
@@ -365,12 +364,14 @@ impl LeafComplexApp {
                 .filter_map(|img| {
                     state_guard.analysis_results.get(&img.path).map(|r| (
                         img.filename.clone(),
+                        img.path.clone(),
                         r.ec_csv.clone(),   // pre-built — just memcpy
                         r.mc_csv.clone(),
                         r.summary.clone(),
                     ))
                 })
-                .collect()
+                .collect();
+            (data, state_guard.workspace_dir.clone())
         };
 
         if export_data.is_empty() {
@@ -410,7 +411,7 @@ impl LeafComplexApp {
             let mut all_summaries = Vec::with_capacity(export_data.len());
             let mut failed = 0usize;
 
-            for (filename, ec_csv, mc_csv, summary) in &export_data {
+            for (filename, img_path, ec_csv, mc_csv, summary) in &export_data {
                 // Write pre-built CSV strings — plain byte dump, no formatting work.
                 let ec_path = ec_dir.join(format!("{}_EC.csv", filename));
                 if let Err(e) = fs::write(&ec_path, ec_csv.as_bytes()) {
@@ -426,7 +427,28 @@ impl LeafComplexApp {
                     continue;
                 }
 
-                all_summaries.push((filename.clone(), summary.clone()));
+                // Subfolder = immediate parent directory name.
+                let subfolder = img_path.parent()
+                    .and_then(|p| p.file_name())
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+
+                // Relative path: root_name/subfolders/filename.png
+                // Falls back to full absolute path when no workspace is loaded.
+                let relative_path = match &workspace_dir {
+                    Some(root) => {
+                        let root_name = root.file_name()
+                            .map(|n| n.to_string_lossy().into_owned())
+                            .unwrap_or_default();
+                        match img_path.strip_prefix(root) {
+                            Ok(within) => format!("{}/{}", root_name, within.display()),
+                            Err(_) => img_path.to_string_lossy().into_owned(),
+                        }
+                    }
+                    None => img_path.to_string_lossy().into_owned(),
+                };
+
+                all_summaries.push((filename.clone(), subfolder, relative_path, summary.clone()));
             }
             println!("Written {} CSV pairs", all_summaries.len());
 
@@ -516,20 +538,24 @@ impl LeafComplexApp {
 
 fn write_summary_data(
     path: &PathBuf,
-    summaries: &[(String, SummaryStats)],
+    summaries: &[(String, String, String, SummaryStats)],
 ) -> Result<(), String> {
     use std::io::Write;
     let mut file = std::fs::File::create(path)
         .map_err(|e| format!("Failed to create {:?}: {}", path, e))?;
     writeln!(
         file,
-        "ID,MC,EC,EC_Length,MC_Length,EC_Width,MC_Width,         EC_ShapeIndex,MC_ShapeIndex,EC_Circularity,MC_Circularity,         EC_Area,MC_Area,EC_Outline_Count,MC_Outline_Count"
+        "ID,Subfolder,Path,MC,EC,EC_Length,MC_Length,EC_Width,MC_Width,\
+         EC_ShapeIndex,MC_ShapeIndex,EC_Circularity,MC_Circularity,\
+         EC_Area,MC_Area,EC_Outline_Count,MC_Outline_Count"
     ).map_err(|e| format!("Failed to write header: {}", e))?;
-    for (filename, s) in summaries {
+    for (filename, subfolder, relative_path, s) in summaries {
         writeln!(
             file,
-            "{},{:.4},{:.4},{:.1},{:.1},{:.1},{:.1},{:.3},{:.3},{:.3},{:.3},{},{},{},{}",
+            "{},{},{},{:.4},{:.4},{:.1},{:.1},{:.1},{:.1},{:.3},{:.3},{:.3},{:.3},{},{},{},{}",
             filename,
+            subfolder,
+            relative_path,
             s.mc_spectral_entropy, s.ec_spectral_entropy,
             s.ec_length, s.mc_length,
             s.ec_width, s.mc_width,

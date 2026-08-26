@@ -1,4 +1,4 @@
-// config_editor.rs - Configuration Editor Window for LeafComplexR GUI
+// config_editor.rs - Configuration Editor Window for ShapeComplexity GUI
 
 use eframe::egui;
 use crate::config::Config;

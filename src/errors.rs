@@ -2,7 +2,7 @@ use thiserror::Error;
 use std::io;
 use std::path::PathBuf;
 
-/// Custom error types for LeafComplexR
+/// Custom error types for ShapeComplexity
 #[derive(Error, Debug)]
 pub enum LeafComplexError {
     #[error("IO error: {0}")]

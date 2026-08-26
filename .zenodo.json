@@ -1,0 +1,72 @@
+{
+  "title": "ShapeComplexity: entropy-based metrics for quantifying edge- and macro-shape complexity",
+  "description": "<p>ShapeComplexity is a high-performance Rust tool for quantifying the shape complexity of leaves and other biological structures from PNG images. It decomposes a shape into complementary edge and macro-shape layers, converts each into a signal curve, and quantifies <strong>edge complexity (EC)</strong> via approximate entropy and <strong>macro-shape complexity (MC)</strong> via spectral entropy. It additionally reports fractal dimension, circularity, shape index and leaf area. Both a command-line interface for batch processing and a graphical interface for interactive inspection are provided.</p><p>This release accompanies the manuscript &quot;Introducing entropy-based metrics for quantifying edge- and macro-shape complexity in leaves and beyond&quot;.</p>",
+  "upload_type": "software",
+  "access_right": "open",
+  "license": "MIT",
+  "version": "1.0.0",
+  "language": "eng",
+  "keywords": [
+    "leaf shape complexity",
+    "edge complexity",
+    "macro-shape complexity",
+    "approximate entropy",
+    "spectral entropy",
+    "fractal dimension",
+    "morphospace",
+    "plant functional trait",
+    "image analysis",
+    "Rust"
+  ],
+  "creators": [
+    {
+      "name": "Trauden, Tobias",
+      "affiliation": "Conservation Ecology, Marburg University, Marburg, Germany",
+      "orcid": "0009-0009-5603-3008"
+    },
+    {
+      "name": "Rakotomalala, Anjaharinony A. N. A.",
+      "affiliation": "Conservation Ecology, Marburg University, Marburg, Germany",
+      "orcid": "0000-0001-6674-3390"
+    },
+    {
+      "name": "Junker, Robert R.",
+      "affiliation": "Evolutionary Ecology of Plants, Marburg University, Marburg, Germany",
+      "orcid": "0000-0002-7919-9678"
+    },
+    {
+      "name": "Sauereßig, Lucy",
+      "affiliation": "Evolutionary Ecology of Plants, Marburg University, Marburg, Germany",
+      "orcid": "0009-0007-4401-8869"
+    },
+    {
+      "name": "Trauden, Kerima",
+      "affiliation": "Koblenz University, Koblenz, Germany"
+    },
+    {
+      "name": "Muñoz Andres, Merle",
+      "affiliation": "Conservation Ecology, Marburg University, Marburg, Germany"
+    },
+    {
+      "name": "Dannoritzer, Rebecca",
+      "affiliation": "Conservation Ecology, Marburg University, Marburg, Germany"
+    },
+    {
+      "name": "Farwig, Nina",
+      "affiliation": "Conservation Ecology, Marburg University, Marburg, Germany",
+      "orcid": "0000-0002-0554-5128"
+    },
+    {
+      "name": "Pinkert, Stefan",
+      "affiliation": "Conservation Ecology, Marburg University, Marburg, Germany",
+      "orcid": "0000-0002-8348-2337"
+    }
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "https://github.com/Thornbach/ShapeComplexity",
+      "relation": "isSupplementTo",
+      "scheme": "url"
+    }
+  ]
+}

@@ -1,0 +1,91 @@
+cff-version: 1.2.0
+message: "If you use ShapeComplexity in your research, please cite both the software and the accompanying paper."
+title: "ShapeComplexity: entropy-based metrics for quantifying edge- and macro-shape complexity"
+abstract: >-
+  ShapeComplexity is a high-performance Rust tool for quantifying the shape
+  complexity of leaves and other biological structures from PNG images. It
+  decomposes a shape into complementary edge and macro-shape layers, converts
+  each into a signal curve, and quantifies edge complexity (EC) via approximate
+  entropy and macro-shape complexity (MC) via spectral entropy. It also reports
+  fractal dimension, circularity, shape index and area. Command-line and
+  graphical interfaces are provided.
+type: software
+version: 1.0.0
+date-released: 2026-08-26
+license: MIT
+repository-code: "https://github.com/Thornbach/ShapeComplexity"
+keywords:
+  - leaf shape complexity
+  - edge complexity
+  - macro-shape complexity
+  - approximate entropy
+  - spectral entropy
+  - fractal dimension
+  - morphospace
+  - plant functional trait
+  - image analysis
+authors:
+  - given-names: Tobias
+    family-names: Trauden
+    orcid: "https://orcid.org/0009-0009-5603-3008"
+    affiliation: "Conservation Ecology, Marburg University, Marburg, Germany"
+    email: ToTrauden@proton.me
+  - given-names: "Anjaharinony A. N. A."
+    family-names: Rakotomalala
+    orcid: "https://orcid.org/0000-0001-6674-3390"
+    affiliation: "Conservation Ecology, Marburg University, Marburg, Germany"
+  - given-names: "Robert R."
+    family-names: Junker
+    orcid: "https://orcid.org/0000-0002-7919-9678"
+    affiliation: "Evolutionary Ecology of Plants, Marburg University, Marburg, Germany"
+  - given-names: Lucy
+    family-names: Sauereßig
+    orcid: "https://orcid.org/0009-0007-4401-8869"
+    affiliation: "Evolutionary Ecology of Plants, Marburg University, Marburg, Germany"
+  - given-names: Kerima
+    family-names: Trauden
+    affiliation: "Koblenz University, Koblenz, Germany"
+  - given-names: Merle
+    family-names: "Muñoz Andres"
+    affiliation: "Conservation Ecology, Marburg University, Marburg, Germany"
+  - given-names: Rebecca
+    family-names: Dannoritzer
+    affiliation: "Conservation Ecology, Marburg University, Marburg, Germany"
+  - given-names: Nina
+    family-names: Farwig
+    orcid: "https://orcid.org/0000-0002-0554-5128"
+    affiliation: "Conservation Ecology, Marburg University, Marburg, Germany"
+  - given-names: Stefan
+    family-names: Pinkert
+    orcid: "https://orcid.org/0000-0002-8348-2337"
+    affiliation: "Conservation Ecology, Marburg University, Marburg, Germany"
+# After the preprint is posted, add its DOI to the block below as:  doi: "10.1101/..."
+preferred-citation:
+  type: article
+  title: "Introducing entropy-based metrics for quantifying edge- and macro-shape complexity in leaves and beyond"
+  year: 2026
+  authors:
+    - given-names: Tobias
+      family-names: Trauden
+      orcid: "https://orcid.org/0009-0009-5603-3008"
+    - given-names: "Anjaharinony A. N. A."
+      family-names: Rakotomalala
+      orcid: "https://orcid.org/0000-0001-6674-3390"
+    - given-names: "Robert R."
+      family-names: Junker
+      orcid: "https://orcid.org/0000-0002-7919-9678"
+    - given-names: Lucy
+      family-names: Sauereßig
+      orcid: "https://orcid.org/0009-0007-4401-8869"
+    - given-names: Kerima
+      family-names: Trauden
+    - given-names: Merle
+      family-names: "Muñoz Andres"
+    - given-names: Rebecca
+      family-names: Dannoritzer
+    - given-names: Nina
+      family-names: Farwig
+      orcid: "https://orcid.org/0000-0002-0554-5128"
+    - given-names: Stefan
+      family-names: Pinkert
+      orcid: "https://orcid.org/0000-0002-8348-2337"

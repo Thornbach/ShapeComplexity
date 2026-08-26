@@ -62,7 +62,7 @@ pub fn write_ec_csv<P: AsRef<Path>>(
     Ok(())
 }
 
-/// Write MC (Margin Complexity) features to CSV
+/// Write MC (Macro-shape Complexity) features to CSV
 ///
 /// # Arguments
 /// * `features` - Vector of features for each contour point
@@ -137,7 +137,7 @@ pub fn write_mc_csv<P: AsRef<Path>>(
 /// # Output Columns
 /// - ID
 /// - Subfolder
-/// - MC (Spectral entropy from margin complexity)
+/// - MC (Spectral entropy from macro-shape complexity)
 /// - EC (Approximate entropy from edge complexity)
 /// - EC_Length, MC_Length
 /// - EC_Width, MC_Width
@@ -148,6 +148,7 @@ pub fn create_summary<P: AsRef<Path>>(
     output_dir: P,
     filename: &str,
     subfolder: &str,
+    relative_path: &str,
     mc_spectral_entropy: f64,
     ec_approximate_entropy: f64,
     ec_length: f64,
@@ -180,6 +181,7 @@ pub fn create_summary<P: AsRef<Path>>(
         writer.write_record(&[
             "ID",
             "Subfolder",
+            "Path",
             "MC",
             "EC",
             "EC_Length",
@@ -199,6 +201,7 @@ pub fn create_summary<P: AsRef<Path>>(
     writer.write_record(&[
         filename,
         subfolder,
+        relative_path,
         &format!("{:.6}", mc_spectral_entropy),
         &format!("{:.6}", ec_approximate_entropy),
         &format!("{:.1}", ec_length),

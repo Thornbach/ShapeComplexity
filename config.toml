@@ -1,6 +1,6 @@
-# LeafComplexR Configuration File
+# ShapeComplexity Configuration File
 # EC = Edge Complexity (pink regions as opaque)
-# MC = Margin Complexity (pink regions as transparent)
+# MC = Macro-shape Complexity (pink regions as transparent)
 
 # Input/Output Paths
 input_path = "./input"  # Path to a single image or directory for batch processing

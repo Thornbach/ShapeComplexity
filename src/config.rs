@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use crate::errors::{LeafComplexError, Result};
 
-/// Main configuration structure for LeafComplexR
+/// Main configuration structure for ShapeComplexity
 ///
 /// All analysis parameters are configurable via TOML file.
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -55,6 +55,10 @@ pub struct Config {
     /// Enable petiole filtering in EC calculation
     #[serde(default = "default_enable_petiole_filter_ec_complexity")]
     pub enable_petiole_filter_ec_complexity: bool,
+
+    /// Enable petiole filtering in MC analysis (default off; GUI parity)
+    #[serde(default = "default_enable_petiole_filter_mc")]
+    pub enable_petiole_filter_mc: bool,
     
     /// true = remove petiole completely and merge ends, false = set to zero
     #[serde(default = "default_petiole_remove_completely")]
@@ -144,6 +148,7 @@ fn default_adaptive_opening_max_percentage() -> f64 { 15.0 }
 fn default_adaptive_opening_min_percentage() -> f64 { 1.0 }
 fn default_enable_petiole_filter_ec() -> bool { true }
 fn default_enable_petiole_filter_ec_complexity() -> bool { true }
+fn default_enable_petiole_filter_mc() -> bool { false }
 fn default_petiole_remove_completely() -> bool { true }
 fn default_enable_pink_threshold_filter() -> bool { true }
 fn default_pink_threshold_value() -> f64 { 3.0 }
@@ -200,6 +205,7 @@ impl Config {
             adaptive_opening_min_percentage: 1.0,
             enable_petiole_filter_ec: true,
             enable_petiole_filter_ec_complexity: true,
+            enable_petiole_filter_mc: false,
             petiole_remove_completely: true,
             enable_pink_threshold_filter: true,
             pink_threshold_value: 3.0,

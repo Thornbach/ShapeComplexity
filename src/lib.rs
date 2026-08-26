@@ -1,4 +1,4 @@
-// src/lib.rs - Library interface for LeafComplexR
+// src/lib.rs - Library interface for ShapeComplexity
 
 pub mod config;
 pub mod errors;
@@ -12,12 +12,16 @@ pub mod point_analysis;
 pub mod output;
 pub mod thornfiddle;
 pub mod shape_analysis;
+pub mod gui_api;
 
 // Re-export commonly used types and functions
 pub use errors::{LeafComplexError, Result};
 pub use config::Config;
 pub use pipeline::process_image;
 pub use image_io::{InputImage, load_image, save_image};
+
+// Egui-free analysis entry point for embedding in other front-ends.
+pub use gui_api::{analyze, analyze_rgba, MorphMetrics, MorphOverlay, MorphResult};
 
 // Re-export shape analysis functions
 pub use shape_analysis::{

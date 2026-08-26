@@ -1,4 +1,4 @@
-// src/main.rs - Main entry point for LeafComplexR CLI
+// src/main.rs - Main entry point for the ShapeComplexity CLI
 
 mod config;
 mod errors;
@@ -24,9 +24,9 @@ use errors::{LeafComplexError, Result};
 use image_io::{get_png_files_in_dir, load_image};
 use pipeline::process_image;
 
-/// Command-line arguments for LeafComplexR
+/// Command-line arguments for ShapeComplexity
 #[derive(Parser, Debug)]
-#[clap(author, version, about = "LeafComplexR - Leaf Edge and Margin Complexity Analysis")]
+#[clap(author, version, about = "ShapeComplexity - Leaf Edge and Macro-shape Complexity Analysis")]
 struct Args {
     /// Path to input file or directory
     #[clap(short, long)]
@@ -101,24 +101,26 @@ fn main() -> Result<()> {
     let input_path = PathBuf::from(&config.input_path);
     
     if input_path.is_file() {
-        // Process single file
+        // For a single file the root is its parent directory.
+        let root_dir = input_path.parent().unwrap_or(&input_path);
         println!("Processing single file: {}", input_path.display());
         let input_image = load_image(&input_path)?;
-        process_image(input_image, &config, args.debug)?;
+        process_image(input_image, &config, args.debug, root_dir)?;
     } else if input_path.is_dir() {
-        // Process all PNG files in directory
+        // The input directory itself is the root.
+        let root_dir = input_path.as_path();
         println!("Processing directory: {}", input_path.display());
         let png_files = get_png_files_in_dir(&input_path)?;
-        
+
         println!("Found {} PNG files", png_files.len());
-        
+
         if config.use_parallel {
             // Process files in parallel
             png_files.par_iter()
                 .map(|path| {
                     println!("Processing: {}", path.display());
                     match load_image(path) {
-                        Ok(input_image) => process_image(input_image, &config, args.debug),
+                        Ok(input_image) => process_image(input_image, &config, args.debug, root_dir),
                         Err(e) => {
                             eprintln!("Error loading {}: {}", path.display(), e);
                             Err(e)
@@ -131,7 +133,7 @@ fn main() -> Result<()> {
             for path in &png_files {
                 println!("Processing: {}", path.display());
                 let input_image = load_image(path)?;
-                process_image(input_image, &config, args.debug)?;
+                process_image(input_image, &config, args.debug, root_dir)?;
             }
         }
     } else {

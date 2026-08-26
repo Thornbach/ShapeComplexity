@@ -1,7 +1,7 @@
-// config.rs - Configuration for LeafComplexR GUI
+// config.rs - Configuration for the ShapeComplexity GUI
 // This wraps the library config with GUI-specific defaults
 
-use leaf_complex_rust_lib::config::ReferencePointChoice;
+use shapecomplexity::config::ReferencePointChoice;
 
 /// GUI Configuration - matches library Config structure
 #[derive(Debug, Clone)]

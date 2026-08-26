@@ -1,4 +1,4 @@
-// lib.rs - LeafComplexR GUI Library
+// lib.rs - ShapeComplexity GUI Library
 
 pub mod analysis;
 pub mod app;

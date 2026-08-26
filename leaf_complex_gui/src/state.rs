@@ -2,7 +2,7 @@
 use std::path::{Path, PathBuf};
 use std::collections::HashMap;
 use eframe::egui;
-use leaf_complex_rust_lib::feature_extraction::MarginalPointFeatures;
+use shapecomplexity::feature_extraction::MarginalPointFeatures;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum AnalysisStatus {

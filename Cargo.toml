@@ -1,26 +1,29 @@
 [package]
-name = "leaf_complex_rust"
-version = "2.0.0"
+name = "shapecomplexity"
+version = "1.0.0"
 edition = "2021"
-authors = ["Tobias Müller <tobimu@proton.me"]
-description = "A tool for analyzing leaf edge and margin complexity from PNG images"
+authors = ["Tobias Trauden <ToTrauden@proton.me>"]
+description = "Entropy-based metrics for quantifying edge and macro-shape complexity of leaves and other biological structures from images"
 readme = "README.md"
 license = "MIT"
+repository = "https://github.com/Thornbach/ShapeComplexity"
+homepage = "https://github.com/Thornbach/ShapeComplexity"
+keywords = ["morphometrics", "entropy", "leaf", "ecology", "image"]
+categories = ["science", "command-line-utilities"]
 
-# Add lib target for R package to use
+# Library target, also consumed by the GUI crate and by the R bindings
 [lib]
-name = "leaf_complex_rust_lib"
-crate-type = ["rlib", "cdylib"] 
+name = "shapecomplexity"
+crate-type = ["rlib", "cdylib"]
 
 [[bin]]
-name = "leaf_complex_rust_cli"
+name = "shapecomplexity_cli"
 path = "src/main.rs"
 
 [dependencies]
 # Core image processing
 image = "0.24.7"
 imageproc = "0.23.0"
-extendr-api = "0.7.0"
 
 # Configuration
 serde = { version = "1.0", features = ["derive"] }

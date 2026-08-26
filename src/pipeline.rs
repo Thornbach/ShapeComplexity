@@ -1,6 +1,6 @@
 // src/pipeline.rs - Main processing pipeline for EC/MC analysis
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::config::Config;
 use crate::errors::{LeafComplexError, Result};
@@ -97,6 +97,7 @@ pub fn process_image(
     input_image: InputImage,
     config: &Config,
     debug: bool,
+    root_dir: &Path,
 ) -> Result<()> {
     let InputImage { image, path, filename } = input_image;
 
@@ -104,6 +105,24 @@ pub fn process_image(
         .and_then(|p| p.file_name())
         .and_then(|s| s.to_str())
         .unwrap_or("root");
+
+    // Relative path from (and including) the root directory name.
+    // e.g. root_dir = /data/leaves, image = /data/leaves/sp1/leaf.png
+    //   -> relative_path = "leaves/sp1/leaf.png"
+    let relative_path = {
+        let root_name = root_dir.file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        let within_root = path.strip_prefix(root_dir).unwrap_or(&path);
+        if within_root == path.as_path() {
+            // Could not strip root — fall back to just the filename
+            path.file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default()
+        } else {
+            format!("{}/{}", root_name, within_root.display())
+        }
+    };
     
     // Step 1: Resize if configured
     let processed_image = if let Some(dimensions) = config.resize_dimensions {
@@ -354,6 +373,7 @@ pub fn process_image(
         &config.output_base_dir,
         &filename,
         subfolder,
+        &relative_path,
         mc_spectral_entropy,
         ec_approximate_entropy,
         ec_length,

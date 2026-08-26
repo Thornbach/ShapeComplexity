@@ -1356,29 +1356,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "extendr-api"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "67505d96c7faa49d20e749dba7ba2447db52c40a788fd88cc2b6bef02c02277a"
-dependencies = [
- "extendr-macros",
- "libR-sys",
- "once_cell",
- "paste",
-]
-
-[[package]]
-name = "extendr-macros"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "81b58838056f294411d0b2c35ac1a2b24c507d6828b75f2c1e74f00ee9b99267"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.111",
-]
-
-[[package]]
 name = "fastrand"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2099,31 +2076,11 @@ dependencies = [
  "egui_plot",
  "env_logger",
  "image 0.24.9",
- "leaf_complex_rust",
  "log",
  "num_cpus",
  "rfd",
+ "shapecomplexity",
  "tokio",
-]
-
-[[package]]
-name = "leaf_complex_rust"
-version = "2.0.0"
-dependencies = [
- "anyhow",
- "bresenham",
- "clap",
- "csv",
- "extendr-api",
- "image 0.24.9",
- "imageproc",
- "nalgebra 0.32.6",
- "rayon",
- "rustfft",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "toml",
 ]
 
 [[package]]
@@ -2131,12 +2088,6 @@ name = "lebe"
 version = "0.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a79a3332a6609480d7d0c9eab957bca6b455b91bb84e66d19f5ff66294b85b8"
-
-[[package]]
-name = "libR-sys"
-version = "0.7.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "06ac9752bc1e83f5a354a62b9e81bd8db4468b1008e29f262441e7f0e91e6bb3"
 
 [[package]]
 name = "libc"
@@ -3529,6 +3480,25 @@ dependencies = [
  "cfg-if",
  "cpufeatures",
  "digest",
+]
+
+[[package]]
+name = "shapecomplexity"
+version = "1.0.0"
+dependencies = [
+ "anyhow",
+ "bresenham",
+ "clap",
+ "csv",
+ "image 0.24.9",
+ "imageproc",
+ "nalgebra 0.32.6",
+ "rayon",
+ "rustfft",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+ "toml",
 ]
 
 [[package]]

@@ -1,4 +1,4 @@
-// main.rs - LeafComplexR GUI Application Entry Point
+// main.rs - ShapeComplexity GUI Application Entry Point
 
 use eframe::egui;
 use leaf_complex_gui::LeafComplexApp;
@@ -8,12 +8,12 @@ fn main() -> eframe::Result<()> {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1400.0, 900.0])
             .with_min_inner_size([800.0, 600.0])
-            .with_title("LeafComplexR - Edge & Margin Complexity Analysis"),
+            .with_title("ShapeComplexity - Edge & Macro-shape Complexity Analysis"),
         ..Default::default()
     };
     
     eframe::run_native(
-        "LeafComplexR",
+        "ShapeComplexity",
         native_options,
         Box::new(|cc| Ok(Box::new(LeafComplexApp::new(cc)))),
     )

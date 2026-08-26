@@ -159,69 +159,77 @@ pub fn calculate_spectral_entropy_from_contour_legacy(
     calculate_spectral_entropy_from_contour(contour, interpolation_points, 20.0, 0.03)
 }
 
-/// Detect petiole sequence in a signal using outlier analysis
+/// Detect petiole sequence in a signal using outlier analysis.
+///
+/// Three-step approach:
+///   1. Collect all contiguous runs of values > threshold (no extreme-value
+///      filter yet, so we don't discard the tail of a wrap-around sequence).
+///   2. Merge wrap-around: if the contour trace started mid-petiole the
+///      petiole appears as two runs — one at index 0 and one at index n-1.
+///      Merge them into one connected sequence.
+///   3. Keep only runs that contain at least one value >= the 95th percentile
+///      (outlier guard), then return the longest qualifying run.
 pub fn detect_petiole_sequence(signal: &[f64], threshold: f64) -> Option<Vec<usize>> {
     if signal.is_empty() {
         return None;
     }
-    
-    // Sort values to identify outliers
+    let n = signal.len();
+
+    // 95th-percentile outlier threshold
     let mut sorted_values = signal.to_vec();
     sorted_values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
-    
-    // Determine outlier threshold (values above 95th percentile are potential outliers)
-    let outlier_idx = (sorted_values.len() as f64 * 0.95) as usize;
-    let outlier_threshold = if outlier_idx < sorted_values.len() {
-        sorted_values[outlier_idx]
-    } else {
-        f64::MAX
-    };
-    
+    let outlier_idx = ((n as f64 * 0.95) as usize).min(n - 1);
+    let outlier_threshold = sorted_values[outlier_idx];
+
     println!("Petiole detection - Outlier threshold (95th percentile): {}", outlier_threshold);
-    
-    // Find all connected sequences of features above threshold
-    let mut feature_sequences = Vec::new();
-    let mut current_sequence = Vec::new();
-    let mut has_extreme_value = false;
-    
-    // We'll wrap around the contour to handle sequences that cross the start/end boundary
-    let extended_signal: Vec<f64> = signal.iter()
-        .chain(signal.iter())
-        .cloned()
-        .collect();
-    
-    for i in 0..signal.len() {
-        let value = extended_signal[i];
-        
-        if value > threshold {
-            current_sequence.push(i);
-            
-            if value >= outlier_threshold {
-                has_extreme_value = true;
-            }
-        } else if !current_sequence.is_empty() {
-            if has_extreme_value {
-                feature_sequences.push(current_sequence.clone());
-            }
-            current_sequence.clear();
-            has_extreme_value = false;
+
+    // Step 1: Collect all contiguous runs of values above threshold.
+    let mut raw_sequences: Vec<Vec<usize>> = Vec::new();
+    let mut current: Vec<usize> = Vec::new();
+
+    for i in 0..n {
+        if signal[i] > threshold {
+            current.push(i);
+        } else if !current.is_empty() {
+            raw_sequences.push(std::mem::take(&mut current));
         }
     }
-    
-    if !current_sequence.is_empty() && has_extreme_value {
-        feature_sequences.push(current_sequence);
+    if !current.is_empty() {
+        raw_sequences.push(current);
     }
-    
-    // Find the longest sequence (likely the petiole)
-    let longest_sequence = feature_sequences.into_iter()
-        .max_by_key(|seq| seq.len());
-    
-    if let Some(petiole_sequence) = longest_sequence {
-        println!("Detected petiole sequence with {} points", petiole_sequence.len());
-        Some(petiole_sequence)
-    } else {
-        println!("No significant petiole sequence detected");
-        None
+
+    // Step 2: Merge wrap-around sequences.
+    // If both the first run starts at index 0 and the last run ends at index n-1,
+    // they are the two halves of one petiole sequence that straddles the
+    // contour's start/end boundary.  Merge tail + head (circular order).
+    if raw_sequences.len() >= 2 {
+        let first_at_zero = raw_sequences.first().and_then(|s| s.first()).copied() == Some(0);
+        let last_at_end  = raw_sequences.last().and_then(|s| s.last()).copied()  == Some(n - 1);
+        if first_at_zero && last_at_end {
+            let tail = raw_sequences.pop().unwrap();   // ends at n-1
+            let head = raw_sequences.remove(0);        // starts at 0
+            let mut merged = tail;  // tail comes first in circular order
+            merged.extend(head);
+            raw_sequences.push(merged);
+        }
+    }
+
+    // Step 3: Filter to runs that contain at least one extreme value,
+    // then return the longest.
+    let longest = raw_sequences
+        .into_iter()
+        .filter(|seq| seq.iter().any(|&i| signal[i] >= outlier_threshold))
+        .max_by_key(|s| s.len());
+
+    match longest {
+        Some(seq) => {
+            println!("Detected petiole sequence with {} points", seq.len());
+            Some(seq)
+        }
+        None => {
+            println!("No significant petiole sequence detected");
+            None
+        }
     }
 }
 
@@ -303,7 +311,7 @@ pub fn filter_petiole_from_ec_features(
     // Step 1: Apply petiole filtering if enabled
     if enable_petiole_filter && !working_features.is_empty() {
         let pink_signal = extract_pink_path_signal(&working_features);
-        
+
         petiole_indices = detect_petiole_sequence(&pink_signal, threshold);
         
         if let Some(ref indices) = petiole_indices {
@@ -315,13 +323,11 @@ pub fn filter_petiole_from_ec_features(
                     .map(|(_, feature)| feature.clone())
                     .collect();
                 
-                working_features = filtered_features.into_iter()
-                    .enumerate()
-                    .map(|(new_idx, mut feature)| {
-                        feature.point_index = new_idx;
-                        feature
-                    })
-                    .collect();
+                // Keep original point_index values — they are contour-array positions
+                // used by the GUI to look up pixels in ec_contour_original.
+                // Overwriting them with sequential 0,1,2... would cause the GUI
+                // to fetch the wrong contour pixel for every filtered feature.
+                working_features = filtered_features;
                 
                 println!("LEC petiole removal: {} -> {} features", features.len(), working_features.len());
             } else {
@@ -1073,6 +1079,25 @@ pub fn extract_harmonic_thornfiddle_path_signal(features: &[MarginalPointFeature
 pub fn extract_pink_path_signal(features: &[MarginalPointFeatures]) -> Vec<f64> {
     features.iter()
         .map(|feature| feature.diego_path_pink.unwrap_or(0) as f64)
+        .collect()
+}
+
+/// Extract path-length ratio signal: diego_path_length / straight_path_length.
+///
+/// A ratio of 1.0 means the geodesic was a straight line (no detour needed).
+/// A ratio >> 1.0 means the path had to navigate around a concavity — which
+/// is exactly what the petiole attachment creates.  This makes the ratio a
+/// routing-based but pink-independent signal for petiole detection.
+pub fn extract_path_ratio_signal(features: &[MarginalPointFeatures]) -> Vec<f64> {
+    features.iter()
+        .map(|feature| {
+            let s = feature.straight_path_length;
+            if s < 1e-9 {
+                1.0
+            } else {
+                feature.diego_path_length / s
+            }
+        })
         .collect()
 }
 

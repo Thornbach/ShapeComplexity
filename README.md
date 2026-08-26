@@ -1,4 +1,4 @@
-# ShapeComplexity v0.5
+# ShapeComplexity v1.0.0
 
 **A powerful tool for analyzing leaf edge and macro-shape complexity from PNG images**
 
@@ -32,45 +32,48 @@ ShapeComplexity provides both command-line and graphical interfaces for comprehe
 
 ### Windows (Portable - No Installation Required)
 
-**Download the latest release:**
-- **GUI Version**: [LeafComplexR-GUI-v0.5-Windows.zip](https://github.com/Thornbach/ShapeComplexity/releases/download/v0.5/leaf_complex_gui.exe)
+Download the latest Windows build from the
+[**Releases page**](https://github.com/Thornbach/ShapeComplexity/releases/latest).
 
-Simply extract and double-click the `.exe` file to start!
-
+Extract the archive and double-click `leaf_complex_gui.exe` to start the GUI,
+or run `shapecomplexity_cli.exe` from a terminal for batch processing.
 
 ---
 
 ## 🚀 Quick Start
 
 ### GUI Application
-1. Download and extract `LeafComplexR-GUI-v0.5-Windows.zip`
+1. Download and extract the latest release archive
 2. Double-click `leaf_complex_gui.exe`
 3. Click **File → Open Workspace** and select your image folder
 4. Select images and click **Analyze**
 5. Export results via **File → Export Selected Analysis**
 
+> **Input requirement:** images must be PNGs with a transparent background, and
+> ideally share the same resolution.
 
 ---
 
 ## 📊 Output Format
 
-LeafComplexR generates:
+ShapeComplexity generates:
 
 ```
 output/
 ├── EC/                    # Edge Complexity visualizations (pink regions = opaque)
 │   └── [filename]_EC.png
-├── MC/                    # Margin Complexity visualizations (pink regions = transparent)
+├── MC/                    # Macro-shape Complexity visualizations (pink regions = transparent)
 │   └── [filename]_MC.png
 └── summary/
     ├── EC_summary.csv     # Edge complexity metrics
-    └── MC_summary.csv     # Margin complexity metrics
+    └── MC_summary.csv     # Macro-shape complexity metrics
 ```
 
 **Key Metrics:**
 - Geodesic Edge Complexity (length, curvature, entropy)
-- Approximate Entropy (ApEn)
-- Spectral Entropy (SpEn)
+- Approximate Entropy (ApEn) — reported as **EC**, edge complexity
+- Spectral Entropy (SpEn) — reported as **MC**, macro-shape complexity
+- Fractal dimension, circularity, shape index and area
 - Shape indices (length, width, aspect ratio)
 
 ---
@@ -99,7 +102,6 @@ See [config.toml](config.toml) for full documentation of all parameters.
 
 ## 📚 Documentation
 
-
 - **[config.toml](config.toml)** - Parameter reference with explanations
 
 ---
@@ -124,18 +126,18 @@ See [config.toml](config.toml) for full documentation of all parameters.
 
 ##  Building from Source
 
-If youre on Linux or MacOS you may build the tool from source
+If you're on Linux or macOS you may build the tool from source:
 
 ```bash
 # Install Rust (https://rustup.rs/)
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 # Clone repository
-git clone https://github.com/Thornbach/leaf_complex_rust.git
-cd leaf_complex_rust
+git clone https://github.com/Thornbach/ShapeComplexity.git
+cd ShapeComplexity
 
 # Build CLI
-cargo build --release --bin leaf_complex_rust_cli
+cargo build --release --bin shapecomplexity_cli
 
 # Build GUI
 cd leaf_complex_gui
@@ -148,11 +150,29 @@ cargo build --release
 
 ## 📖 Citation
 
-If you use ShapeComplexity in your research, please cite:
+If you use ShapeComplexity in your research, please cite **both** the software
+and the accompanying paper.
+
+**Software:**
 
 ```
-[Your Citation Here]
+Trauden, T., Rakotomalala, A. A. N. A., Junker, R. R., Sauereßig, L.,
+Trauden, K., Muñoz Andres, M., Dannoritzer, R., Farwig, N., & Pinkert, S.
+(2026). ShapeComplexity: entropy-based metrics for quantifying edge- and
+macro-shape complexity (v1.0.0) [Computer software].
+https://github.com/Thornbach/ShapeComplexity
 ```
+
+**Paper:**
+
+```
+Trauden, T., Rakotomalala, A. A. N. A., Junker, R. R., Sauereßig, L.,
+Trauden, K., Muñoz Andres, M., Dannoritzer, R., Farwig, N., & Pinkert, S.
+(2026). Introducing entropy-based metrics for quantifying edge- and
+macro-shape complexity in leaves and beyond.
+```
+
+Machine-readable metadata is provided in [CITATION.cff](CITATION.cff).
 
 ---
 
@@ -164,14 +184,15 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 👤 Author
 
-**Tobias Müller**  
-📧 tobimu@proton.me
+**Tobias Trauden**
+📧 ToTrauden@proton.me
 
 ---
 
 ## 🐛 Issues & Feedback
 
-Found a bug or have a feature request? Please open an issue on [GitHub Issues](https://github.com/YOUR_USERNAME/leaf_complex_rust/issues).
+Found a bug or have a feature request? Please open an issue on
+[GitHub Issues](https://github.com/Thornbach/ShapeComplexity/issues).
 
 ---
 
@@ -181,7 +202,6 @@ Special thanks to contributors and the Rust community for excellent image proces
 
 ---
 
-**Version:** 0.5  
-**Last Updated:** January 2026  
+**Version:** 1.0.0
+**Last Updated:** August 2026
 **Status:** Stable Release
-
