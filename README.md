@@ -1,5 +1,8 @@
 # ShapeComplexity v1.0.0
 
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22113804.svg)](https://doi.org/10.5281/zenodo.22113804)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 **A powerful tool for analyzing leaf edge and macro-shape complexity from PNG images**
 
 ShapeComplexity provides both command-line and graphical interfaces for comprehensive leaf morphology analysis, measuring edge complexity (EC) and macro-shape complexity (MC) through advanced image processing algorithms.
@@ -159,9 +162,13 @@ and the accompanying paper.
 Trauden, T., Rakotomalala, A. A. N. A., Junker, R. R., Sauereßig, L.,
 Trauden, K., Muñoz Andres, M., Dannoritzer, R., Farwig, N., & Pinkert, S.
 (2026). ShapeComplexity: entropy-based metrics for quantifying edge- and
-macro-shape complexity (v1.0.0) [Computer software].
-https://github.com/Thornbach/ShapeComplexity
+macro-shape complexity (v1.0.0) [Computer software]. Zenodo.
+https://doi.org/10.5281/zenodo.22113804
 ```
+
+The DOI above is the **concept DOI**, which always resolves to the newest
+release. To cite the exact version used in the paper, use the version DOI
+[10.5281/zenodo.22113805](https://doi.org/10.5281/zenodo.22113805).
 
 **Paper:**
 
