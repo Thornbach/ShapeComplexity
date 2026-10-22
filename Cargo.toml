@@ -11,7 +11,7 @@ homepage = "https://github.com/Thornbach/ShapeComplexity"
 keywords = ["morphometrics", "leaf", "shape", "ecology", "image"]
 categories = ["science", "command-line-utilities"]
 # test data of the Python reference (23 MB); the tests skip when it is missing
-exclude = ["tests/fixtures", "leaf_complex_gui"]
+exclude = ["tests/fixtures", "leaf_complex_gui", "R"]
 
 # Library target, also used by the GUI crate (leaf_complex_gui)
 [lib]

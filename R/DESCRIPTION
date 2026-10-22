@@ -1,0 +1,27 @@
+Package: shapecomplexity
+Type: Package
+Title: Edge Amount and Macro-Shape Complexity of Leaf Outlines
+Version: 2.0.0
+Authors@R: person("Tobias", "Trauden", email = "ToTrauden@proton.me", role = c("aut", "cre"))
+Description: Measures the edge amount (EA, teeth and other fine margin features) and the
+    macro-shape complexity (MC, lobes and other coarse features) of leaf outlines and other
+    biological shapes from images, plus blade elongation and petiole length. A pure-R port of
+    the Python reference implementation of the method; every step copies the exact library
+    algorithm of the reference (Pillow bilinear resize and polygon fill, SciPy Gaussian filter
+    and exact distance transform, scikit-image marching squares, NumPy interpolation and
+    summation order), so that both give the same numbers. The Rust program 'ShapeComplexity'
+    (<https://github.com/Thornbach/ShapeComplexity>) implements the same method.
+License: MIT + file LICENSE
+URL: https://github.com/Thornbach/ShapeComplexity
+BugReports: https://github.com/Thornbach/ShapeComplexity/issues
+Encoding: UTF-8
+Depends: R (>= 4.0.0)
+Imports:
+    nabor,
+    parallel,
+    png,
+    utils
+Suggests:
+    testthat (>= 3.0.0)
+Config/testthat/edition: 3
+Config/roxygen2/version: 8.1.1

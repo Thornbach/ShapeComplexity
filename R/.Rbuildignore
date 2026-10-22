@@ -1,0 +1,4 @@
+^\.Rbuildignore$
+^.*\.Rproj$
+^\.Rproj\.user$
+^README\.md$

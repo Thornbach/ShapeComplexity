@@ -174,6 +174,11 @@ also returns the intermediate stages (normalised mask, L′, outline, blade line
 and where the normalised mask lies in the input). `v2::metrics::efd_reconstruct(&white, k)` gives the k-harmonic
 fit; `batch::measure_file` adds the mask check.
 
+### R package
+
+Folder [`R/`](R/README.md) holds the R package `shapecomplexity`, a pure-R implementation of the same method
+(PNG input, same mask rules and output columns; no GUI or picture export). Install it with `R CMD INSTALL R`.
+
 ---
 
 ## Testing

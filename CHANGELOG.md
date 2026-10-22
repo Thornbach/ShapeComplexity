@@ -93,6 +93,23 @@ v2.0.0 replaces the v1 method. The numbers of v1.0.0 cannot be reproduced with t
 - `tests/v2_steps.rs` and `tests/fixtures/`: every step against fixtures of the reference (bit for bit), and the
   whole pipeline on 221 masks (201 synthetic shapes, 20 own oak leaves). The fixtures are excluded from the
   published crate; the tests skip without them.
+- `R/`: R package `shapecomplexity` 2.0.0, a pure-R port of the same Python reference (D111, D112), with one file
+  per step as in `src/v2/` (`utils`, `mask`, `resize`, `morph`, `contour`, `fill`, `metrics`, `measure`).
+  Functions `read_mask` (mask sources `auto`, `alpha`, `dark`, the same rules as the program), `normalise`,
+  `measure`, `measure_normalised` (with `trace = TRUE` the intermediate stages), `measure_files` (the program's
+  columns), and the port-check entry `shapecomplexity:::port_check`. Dependencies: `png`, `nabor`.
+  - Connected components from row runs with union-find (labels in raster order, as SciPy).
+  - The opening uses only the two distance thresholds (≥ 30 px, ≤ 31.5 px). They are computed exactly from
+    squared integer distances: an exact column pass, then the row pass within ±31 columns, only for pixels with a
+    target pixel in the ±31 px box. No other pixel can be closer than 32 px, so both decisions equal SciPy's.
+  - C `hypot` through `Mod()` of a complex number (libm `cabs`), so arc lengths equal NumPy's bit for bit;
+    `sqrt(x^2 + y^2)` differs in the last bit for about one value in six. Sequential and NumPy-pairwise sums
+    where the reference uses them (R's `sum` and `cumsum` accumulate in long double). Pillow's single-precision
+    polygon fill through rounding to `float` after each step.
+  - Tests (`R/tests/testthat`): every step against the fixtures, bit for bit (resize, Gaussian, contour, polygon,
+    the 20 leaf stage chains); labels against a flood fill; windowed distances against brute force; the whole
+    pipeline on the public masks (every 10th by default, all with `SHAPECOMPLEXITY_FULL_TESTS=true`); the mask
+    sources and a disk. `R CMD check`: OK.
 
 ### Removed (D112)
 - The v1 algorithm: edge complexity EC (approximate entropy of the pink-path signal), MC from spectral entropy of
