@@ -8,7 +8,7 @@ fn main() -> eframe::Result<()> {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1400.0, 900.0])
             .with_min_inner_size([800.0, 600.0])
-            .with_title("ShapeComplexity - Edge & Macro-shape Complexity Analysis"),
+            .with_title("ShapeComplexity - edge amount (EA) and macro-shape complexity (MC)"),
         ..Default::default()
     };
     

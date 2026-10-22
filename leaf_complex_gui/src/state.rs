@@ -1,8 +1,10 @@
 // Application State Management
-use std::path::{Path, PathBuf};
 use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+
 use eframe::egui;
-use shapecomplexity::feature_extraction::MarginalPointFeatures;
+use shapecomplexity::batch::image_files;
+use shapecomplexity::{MaskSource, Measurement};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum AnalysisStatus {
@@ -12,51 +14,53 @@ pub enum AnalysisStatus {
     Failed,
 }
 
+/// Pixel classes of the normalised mask picture (see `PackedMask`).
+pub const CLASS_BACKGROUND: u8 = 0;
+pub const CLASS_LEAF: u8 = 1;
+pub const CLASS_REMOVED: u8 = 2;
+pub const CLASS_FILLED: u8 = 3;
+
+/// Normalised mask stored at 2 bits per pixel (about 0.3 MB per leaf), so that large batches fit in memory.
+/// The texture is built only for the image on screen.
 #[derive(Clone)]
-pub struct AnalysisResult {
-    pub ec_data: Vec<(f64, f64)>,
-    pub mc_data: Vec<(f64, f64)>,
-    pub summary: SummaryStats,
-    pub ec_image_texture: Option<egui::TextureHandle>,
-    pub mc_image_texture: Option<egui::TextureHandle>,
-    pub original_texture: Option<egui::TextureHandle>,
-
-    pub ec_contour: Vec<(u32, u32)>,
-    pub mc_contour: Vec<(u32, u32)>,
-
-    pub ec_features: Vec<MarginalPointFeatures>,
-    pub mc_features: Vec<MarginalPointFeatures>,
-    pub ec_reference_point: (u32, u32),
-    pub mc_reference_point: (u32, u32),
-
-    /// Pre-built CSV strings — written directly to disk at export time.
-    /// Avoids re-formatting 1000+ rows per image during export.
-    pub ec_csv: String,
-    pub mc_csv: String,
+pub struct PackedMask {
+    pub width: usize,
+    pub height: usize,
+    bits: Vec<u8>,
 }
 
-#[derive(Clone, Default)]
-pub struct SummaryStats {
-    pub ec_length: f64,
-    pub ec_width: f64,
-    pub ec_shape_index: f64,
-    pub ec_circularity: f64,
-    pub ec_spectral_entropy: f64,
-    pub ec_area: u32,
-    pub ec_outline_count: u32,
+impl PackedMask {
+    pub fn from_classes(width: usize, height: usize, classes: impl Iterator<Item = u8>) -> Self {
+        let mut bits = vec![0u8; (width * height).div_ceil(4)];
+        for (i, c) in classes.enumerate() {
+            bits[i / 4] |= (c & 3) << (2 * (i % 4));
+        }
+        Self { width, height, bits }
+    }
 
-    pub mc_length: f64,
-    pub mc_width: f64,
-    pub mc_shape_index: f64,
-    pub mc_circularity: f64,
-    pub mc_spectral_entropy: f64,
-    pub mc_area: u32,
-    pub mc_outline_count: u32,
+    pub fn class(&self, i: usize) -> u8 {
+        (self.bits[i / 4] >> (2 * (i % 4))) & 3
+    }
+}
+
+/// What the GUI keeps of one analysis.
+#[derive(Clone)]
+pub struct AnalysisResult {
+    pub measurement: Measurement,
+    pub mask: PackedMask,
+    /// Outline and blade line as (x, y) in pixel units of the mask picture.
+    pub outline: Vec<[f32; 2]>,
+    pub blade_line: Vec<[f32; 2]>,
+    /// h(s), px, one value per outline point.
+    pub margin_profile: Vec<f64>,
+    /// e(k) / sqrt(A), k = 1, 2, ...; empty if MC was not computed.
+    pub error_curve: Vec<f64>,
 }
 
 pub struct ImageInfo {
     pub path: PathBuf,
-    pub filename: String,
+    /// Path relative to the workspace folder (the `file` column of the export).
+    pub label: String,
     pub thumbnail: Option<egui::TextureHandle>,
     pub status: AnalysisStatus,
     pub selected: bool,
@@ -68,31 +72,30 @@ pub struct AppState {
     pub images: Vec<ImageInfo>,
     pub current_image_index: Option<usize>,
 
+    /// Which pixels are leaf. None until the user chooses: there is no default.
+    pub mask_source: Option<MaskSource>,
+
     // Analysis
     pub analysis_results: HashMap<PathBuf, AnalysisResult>,
+    pub errors: HashMap<PathBuf, String>,
     pub analysis_in_progress: bool,
     pub batch_processing: bool,
     pub current_batch_index: usize,
     pub total_batch_count: usize,
 
+    /// Texture of the mask on screen, with the image it belongs to.
+    pub mask_texture: Option<(PathBuf, egui::TextureHandle)>,
+
     // UI State
+    /// Index of the outline point picked in the h(s) plot.
     pub selected_point: Option<usize>,
-    pub selected_point_type: PointType,
-    pub show_ec_overlay: bool,
-    pub show_mc_overlay: bool,
-    pub show_path_overlay: bool,
+    pub show_outline: bool,
+    pub show_blade_line: bool,
     pub zoom_level: f32,
     pub pan_offset: egui::Vec2,
 
-    pub thumbnail_scroll_offset: f32,
-
     pub last_error: Option<String>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub enum PointType {
-    EC,
-    MC,
+    pub last_message: Option<String>,
 }
 
 impl Default for AppState {
@@ -101,60 +104,92 @@ impl Default for AppState {
             workspace_dir: None,
             images: Vec::new(),
             current_image_index: None,
+            mask_source: None,
             analysis_results: HashMap::new(),
+            errors: HashMap::new(),
             analysis_in_progress: false,
             batch_processing: false,
             current_batch_index: 0,
             total_batch_count: 0,
+            mask_texture: None,
             selected_point: None,
-            selected_point_type: PointType::EC,
-            show_ec_overlay: true,
-            show_mc_overlay: true,
-            show_path_overlay: true,
+            show_outline: true,
+            show_blade_line: true,
             zoom_level: 1.0,
             pan_offset: egui::Vec2::ZERO,
-            thumbnail_scroll_offset: 0.0,
             last_error: None,
+            last_message: None,
         }
     }
 }
 
 impl AppState {
     pub fn current_image(&self) -> Option<&ImageInfo> {
-        self.current_image_index
-            .and_then(|idx| self.images.get(idx))
+        self.current_image_index.and_then(|idx| self.images.get(idx))
     }
 
     pub fn current_result(&self) -> Option<&AnalysisResult> {
-        self.current_image()
-            .and_then(|img| self.analysis_results.get(&img.path))
+        self.current_image().and_then(|img| self.analysis_results.get(&img.path))
     }
 
-    pub fn load_workspace(&mut self, dir: PathBuf) {
+    pub fn load_workspace(&mut self, dir: PathBuf) -> Result<(), String> {
+        let files = image_files(&dir, true)?;
         self.workspace_dir = Some(dir.clone());
         self.images.clear();
         self.current_image_index = None;
-
-        // FIX 1: Use recursive collection with output-folder/output-file filtering
-        let mut png_paths = Vec::new();
-        collect_png_files_recursive(&dir, &mut png_paths);
-
-        for path in png_paths {
-            if let Some(filename) = path.file_stem().and_then(|s| s.to_str()) {
-                self.images.push(ImageInfo {
-                    path: path.clone(),
-                    filename: filename.to_string(),
-                    thumbnail: None,
-                    status: AnalysisStatus::NotStarted,
-                    selected: false,
-                });
-            }
+        self.clear_results();
+        for path in files {
+            let label = shapecomplexity::batch::file_label(&path, &dir);
+            self.images.push(ImageInfo {
+                path,
+                label,
+                thumbnail: None,
+                status: AnalysisStatus::NotStarted,
+                selected: false,
+            });
         }
-
-        self.images.sort_by(|a, b| a.filename.cmp(&b.filename));
-
         if !self.images.is_empty() {
             self.current_image_index = Some(0);
+        }
+        Ok(())
+    }
+
+    /// Results depend on the mask source, so a new source drops them.
+    pub fn set_mask_source(&mut self, source: MaskSource) {
+        if self.mask_source != Some(source) {
+            self.mask_source = Some(source);
+            self.clear_results();
+        }
+    }
+
+    fn clear_results(&mut self) {
+        self.analysis_results.clear();
+        self.errors.clear();
+        self.mask_texture = None;
+        self.selected_point = None;
+        for img in &mut self.images {
+            img.status = AnalysisStatus::NotStarted;
+        }
+    }
+
+    pub fn set_result(&mut self, path: &Path, result: Result<AnalysisResult, String>) {
+        let status = match result {
+            Ok(r) => {
+                self.errors.remove(path);
+                self.analysis_results.insert(path.to_path_buf(), r);
+                AnalysisStatus::Completed
+            }
+            Err(e) => {
+                self.analysis_results.remove(path);
+                self.errors.insert(path.to_path_buf(), e);
+                AnalysisStatus::Failed
+            }
+        };
+        if let Some(img) = self.images.iter_mut().find(|i| i.path == path) {
+            img.status = status;
+        }
+        if self.mask_texture.as_ref().is_some_and(|(p, _)| p == path) {
+            self.mask_texture = None;
         }
     }
 
@@ -184,73 +219,10 @@ impl AppState {
     }
 
     pub fn get_selected_images(&self) -> Vec<PathBuf> {
-        self.images.iter()
-            .filter(|img| img.selected)
-            .map(|img| img.path.clone())
-            .collect()
+        self.images.iter().filter(|img| img.selected).map(|img| img.path.clone()).collect()
     }
 
     pub fn selected_count(&self) -> usize {
         self.images.iter().filter(|img| img.selected).count()
-    }
-}
-
-/// Recursively collect PNG files from a directory tree.
-///
-/// Skips:
-///   - Known output folders produced by the exporter (EC, MC, summary,
-///     ShapeComplexityResults) so their images never pollute the workspace.
-///   - PNG files whose stem ends with `_EC` or `_MC`, which are our own
-///     visualisation outputs, even if they somehow end up in a non-output folder.
-///
-/// FIX 1 (transparency bug): output images have opaque backgrounds; loading
-///   them caused the alpha-based calculations to fail intermittently depending
-///   on where the user had previously exported results.
-///
-/// FIX 2 (subfolder support): the old implementation called `read_dir` only on
-///   the top-level directory. This function recurses into every subfolder that
-///   is not an output folder, enabling workspace trees like:
-///
-///   workspace/
-///     species_a/
-///       leaf1.png
-///       leaf2.png
-///     species_b/
-///       leaf3.png
-fn collect_png_files_recursive(dir: &Path, result: &mut Vec<PathBuf>) {
-    // Folder names produced by the exporter — never recurse into these.
-    const SKIP_DIRS: &[&str] = &["EC", "MC", "summary", "ShapeComplexityResults"];
-
-    let Ok(entries) = std::fs::read_dir(dir) else { return };
-
-    for entry in entries.flatten() {
-        let path = entry.path();
-
-        if path.is_dir() {
-            let dir_name = path
-                .file_name()
-                .and_then(|s| s.to_str())
-                .unwrap_or("");
-            if !SKIP_DIRS.contains(&dir_name) {
-                collect_png_files_recursive(&path, result);
-            }
-        } else if path.is_file() {
-            let is_png = path
-                .extension()
-                .and_then(|e| e.to_str())
-                .map(|e| e.eq_ignore_ascii_case("png"))
-                .unwrap_or(false);
-
-            if is_png {
-                let stem = path
-                    .file_stem()
-                    .and_then(|s| s.to_str())
-                    .unwrap_or("");
-                // Skip our own output visualisations
-                if !stem.ends_with("_EC") && !stem.ends_with("_MC") {
-                    result.push(path);
-                }
-            }
-        }
     }
 }

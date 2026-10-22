@@ -6,19 +6,30 @@ use super::contour::{resample, Point};
 use super::fill::polygon_fill;
 use super::{np_sum, K_MAX, SQRT_A, STOP, TAU};
 
-/// Edge amount (D30, "B8"): extra length of the margin profile h(s) unrolled along the blade line.
-pub fn edge_amount(c: &[Point], bl: &[Point]) -> f64 {
+/// Margin profile h(s): signed distance of each outline point from the blade line, along the blade line's normal.
+pub fn margin_profile(c: &[Point], bl: &[Point]) -> Vec<f64> {
     let n = bl.len();
     let next = |i: usize| (i + 1) % n;
     let prev = |i: usize| (i + n - 1) % n;
-    let h: Vec<f64> = (0..n)
+    (0..n)
         .map(|i| {
             let t = [bl[next(i)][0] - bl[prev(i)][0], bl[next(i)][1] - bl[prev(i)][1]];
             let len = t[0].hypot(t[1]);
             let nrm = [-t[1] / len, t[0] / len];
             (c[i][0] - bl[i][0]) * nrm[0] + (c[i][1] - bl[i][1]) * nrm[1]
         })
-        .collect();
+        .collect()
+}
+
+/// Edge amount (D30, "B8"): extra length of the margin profile h(s) unrolled along the blade line.
+pub fn edge_amount(c: &[Point], bl: &[Point]) -> f64 {
+    edge_amount_from_profile(&margin_profile(c, bl), bl)
+}
+
+/// Edge amount from a margin profile `h` already computed for the blade line `bl`.
+pub fn edge_amount_from_profile(h: &[f64], bl: &[Point]) -> f64 {
+    let n = bl.len();
+    let next = |i: usize| (i + 1) % n;
     let ds: Vec<f64> = (0..n).map(|i| (bl[next(i)][0] - bl[i][0]).hypot(bl[next(i)][1] - bl[i][1])).collect();
     let extra: Vec<f64> = (0..n).map(|i| ds[i].hypot(h[next(i)] - h[i]) - ds[i]).collect();
     np_sum(&extra) / np_sum(&ds)
@@ -247,6 +258,11 @@ pub fn error_curve(w: &[Point]) -> Vec<f64> {
 
 /// D40: MC = sum_k max(0, ln(e(k) / tau)).
 pub fn macro_complexity(w: &[Point]) -> f64 {
-    let terms: Vec<f64> = error_curve(w).iter().map(|e| (e / TAU).ln().max(0.0)).collect();
+    macro_complexity_from_curve(&error_curve(w))
+}
+
+/// MC from an error curve e(k) / sqrt(A) already computed by `error_curve`.
+pub fn macro_complexity_from_curve(e: &[f64]) -> f64 {
+    let terms: Vec<f64> = e.iter().map(|e| (e / TAU).ln().max(0.0)).collect();
     np_sum(&terms)
 }

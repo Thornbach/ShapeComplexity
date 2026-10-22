@@ -139,6 +139,45 @@ pub fn load_alpha_mask(path: &Path) -> Result<Mask, String> {
     Ok(Grid::from_vec(h, w, rgba.pixels().map(|p| p.0[3] > 127).collect()))
 }
 
+/// Leaf mask from a binary image with a dark leaf on a light background: grey value < 128 (the `image` crate's
+/// luma of the colour channels). Pixels with alpha <= 127 never count as leaf. Meant for black-and-white masks;
+/// on a photograph the result is whatever falls below the threshold.
+pub fn load_dark_mask(path: &Path) -> Result<Mask, String> {
+    let img = image::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let luma = img.to_luma8();
+    let alpha: Option<Vec<bool>> =
+        img.color().has_alpha().then(|| img.to_rgba8().pixels().map(|p| p.0[3] > 127).collect());
+    let (w, h) = (luma.width() as usize, luma.height() as usize);
+    let data = luma.pixels().enumerate().map(|(i, p)| p.0[0] < 128 && alpha.as_ref().is_none_or(|a| a[i])).collect();
+    Ok(Grid::from_vec(h, w, data))
+}
+
+/// Which pixels of an input image are leaf. There is no default: the user always says which rule applies.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum MaskSource {
+    /// Opaque pixels (alpha > 127) of an image with a transparent background, e.g. a cut-out.
+    Alpha,
+    /// Dark pixels (grey value < 128) of a binary image with a dark leaf on a light background.
+    Dark,
+}
+
+impl MaskSource {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            MaskSource::Alpha => "alpha",
+            MaskSource::Dark => "dark",
+        }
+    }
+}
+
+/// Leaf mask of an image file by the chosen rule.
+pub fn load_mask(path: &Path, source: MaskSource) -> Result<Mask, String> {
+    match source {
+        MaskSource::Alpha => load_alpha_mask(path),
+        MaskSource::Dark => load_dark_mask(path),
+    }
+}
+
 /// An already normalised mask (1-bit PNG; any non-zero pixel = leaf).
 pub fn load_normalised_mask(path: &Path) -> Result<Mask, String> {
     let g = image::open(path).map_err(|e| format!("{}: {e}", path.display()))?.to_luma8();
@@ -222,6 +261,11 @@ pub struct Trace {
     /// Outline c and blade line BL, in the frame of `lp` padded by PAD_CONTOUR px.
     pub outline: Vec<Point>,
     pub blade_line: Vec<Point>,
+    /// Margin profile h(s) along the blade line, px (EA is the extra length of this profile).
+    pub margin_profile: Vec<f64>,
+    /// Error curve e(k) / sqrt(A) of the whitened blade line, k = 1, 2, ... (MC sums its log excess over TAU).
+    /// Empty if MC was not computed.
+    pub error_curve: Vec<f64>,
 }
 
 /// All v2 numbers for a normalised mask; `native` = sqrt(A) in px before normalisation (for the flags).
@@ -237,10 +281,12 @@ pub fn measure_normalised_traced(m: &Mask, native: Option<f64>) -> (Measurement,
     let bl_frame: Vec<Point> = bl.iter().map(|p| [p[0] - pad, p[1] - pad]).collect();
     let (white, elongation) = metrics::whiten(&bl_frame, lp.rows, lp.cols);
     let (ea_flag, mc_flag) = flags(native);
-    let ea = if ea_flag != Flag::NotResolved { metrics::edge_amount(&c, &bl) } else { f64::NAN };
-    let mc = if mc_flag != Flag::NotResolved { metrics::macro_complexity(&white) } else { f64::NAN };
+    let h = metrics::margin_profile(&c, &bl);
+    let ea = if ea_flag != Flag::NotResolved { metrics::edge_amount_from_profile(&h, &bl) } else { f64::NAN };
+    let e = if mc_flag != Flag::NotResolved { metrics::error_curve(&white) } else { Vec::new() };
+    let mc = if mc_flag != Flag::NotResolved { metrics::macro_complexity_from_curve(&e) } else { f64::NAN };
     let meas = Measurement { ea, mc, elongation, petiole_len, sqrt_a_native: native.unwrap_or(f64::NAN), ea_flag, mc_flag };
-    (meas, Trace { norm: m.clone(), lp, outline: c, blade_line: bl })
+    (meas, Trace { norm: m.clone(), lp, outline: c, blade_line: bl, margin_profile: h, error_curve: e })
 }
 
 /// All v2 numbers for a raw leaf mask (any size). None for an empty mask.

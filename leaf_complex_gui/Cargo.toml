@@ -1,9 +1,9 @@
 [package]
 name = "leaf_complex_gui"
-version = "1.0.0"
+version = "2.0.0"
 edition = "2021"
 authors = ["Tobias Trauden <ToTrauden@proton.me>"]
-description = "Interactive GUI for ShapeComplexity - Edge and Macro-shape Complexity Analysis"
+description = "Interactive GUI for ShapeComplexity: edge amount (EA) and macro-shape complexity (MC)"
 license = "MIT"
 repository = "https://github.com/Thornbach/ShapeComplexity"
 
@@ -22,15 +22,8 @@ rfd = "0.15"
 # Image handling (same as backend)
 image = "0.24.7"
 
-# Logging
-env_logger = "0.11"
-log = "0.4"
-
 # System info
 num_cpus = "1.16"
-
-# Async runtime (for background tasks)
-tokio = { version = "1", features = ["full"] }
 
 [profile.release]
 opt-level = 3

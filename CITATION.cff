@@ -1,17 +1,17 @@
 cff-version: 1.2.0
 message: "If you use ShapeComplexity in your research, please cite both the software and the accompanying paper."
-title: "ShapeComplexity: entropy-based metrics for quantifying edge- and macro-shape complexity"
+title: "ShapeComplexity: edge amount and macro-shape complexity of leaf outlines"
 abstract: >-
-  ShapeComplexity is a high-performance Rust tool for quantifying the shape
-  complexity of leaves and other biological structures from PNG images. It
-  decomposes a shape into complementary edge and macro-shape layers, converts
-  each into a signal curve, and quantifies edge complexity (EC) via approximate
-  entropy and macro-shape complexity (MC) via spectral entropy. It also reports
-  fractal dimension, circularity, shape index and area. Command-line and
-  graphical interfaces are provided.
+  ShapeComplexity is a Rust tool (command line, GUI and library) that measures
+  two properties of a leaf outline from an image mask: edge amount (EA), the
+  extra length of the margin profile around a smoothed blade line, which grows
+  with teeth; and macro-shape complexity (MC), the summed log excess of
+  elliptic Fourier fitting errors of the whitened blade line over a tolerance,
+  which grows with lobes. It also reports blade elongation and petiole length.
+  Version 2.0.0 replaces the entropy-based metrics of version 1.0.0.
 type: software
-version: 1.0.0
-date-released: 2026-08-26
+version: 2.0.0
+# date-released: set at the v2.0.0 release (step M5), together with its version DOI
 license: MIT
 repository-code: "https://github.com/Thornbach/ShapeComplexity"
 doi: "10.5281/zenodo.22113804"
@@ -21,14 +21,14 @@ identifiers:
     description: "Concept DOI - always resolves to the latest version"
   - type: doi
     value: "10.5281/zenodo.22113805"
-    description: "Version DOI for v1.0.0, the release used in the accompanying paper"
+    description: "Version DOI for v1.0.0 (original entropy-based EC and MC metrics)"
 keywords:
-  - leaf shape complexity
-  - edge complexity
+  - leaf shape
+  - leaf teeth
+  - leaf lobes
+  - edge amount
   - macro-shape complexity
-  - approximate entropy
-  - spectral entropy
-  - fractal dimension
+  - elliptic Fourier analysis
   - morphospace
   - plant functional trait
   - image analysis
@@ -67,10 +67,11 @@ authors:
     family-names: Pinkert
     orcid: "https://orcid.org/0000-0002-8348-2337"
     affiliation: "Conservation Ecology, Marburg University, Marburg, Germany"
-# After the preprint is posted, add its DOI to the block below as:  doi: "10.1101/..."
+# The accompanying paper is in preparation; add journal, volume and DOI when it is published.
 preferred-citation:
   type: article
-  title: "Introducing entropy-based metrics for quantifying edge- and macro-shape complexity in leaves and beyond"
+  status: in-preparation
+  title: "Separating teeth from lobes in leaf outlines: edge amount and macro-shape complexity"
   year: 2026
   authors:
     - given-names: Tobias

@@ -1,214 +1,146 @@
-# ShapeComplexity v1.0.0
+# ShapeComplexity v2.0.0
 
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.22113804.svg)](https://doi.org/10.5281/zenodo.22113804)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**A powerful tool for analyzing leaf edge and macro-shape complexity from PNG images**
+ShapeComplexity measures two things about a leaf outline from an image: how much the margin is toothed or
+wavy at a small scale (**edge amount, EA**) and how complex the overall blade shape is, for example through
+lobes (**macro-shape complexity, MC**). It also reports the blade's elongation and the petiole length. It comes
+as a command-line tool, a desktop GUI and a Rust library. All three use the same pipeline function.
 
-ShapeComplexity provides both command-line and graphical interfaces for comprehensive leaf morphology analysis, measuring edge complexity (EC) and macro-shape complexity (MC) through advanced image processing algorithms.
-
----
-
-##  Features
-
-### Edge Complexity (EC) Analysis
-- **Geodesic path analysis** along leaf edges with adaptive morphological opening
-- **Approximate Entropy (ApEn)** calculation for edge irregularity
-- **Adaptive petiole filtering** for accurate edge measurements
-
-### Macro-shape Complexity (MC) Analysis
-- **Harmonic enhancement** for capturing periodic patterns
-- **Spectral entropy** using FFT-based frequency analysis
-
-### Dual Interface
-- 🖥️ **GUI Application** - Interactive visual analysis with real-time overlays
-- ⌨️ **CLI Tool** - Batch processing for high-throughput analysis
-
-### Advanced Capabilities
-- Parallel processing for batch operations
-- Configurable reference points (Center of Mass or Emerge Point)
-- Comprehensive CSV output with 20+ metrics per image
+> **v2.0.0 replaces the v1 method.** The v1 metrics (edge complexity EC from approximate entropy, MC from
+> spectral entropy, the thornfiddle and geodesic paths) are no longer in the code. To reproduce v1 results, use
+> v1.0.0: [10.5281/zenodo.22113805](https://doi.org/10.5281/zenodo.22113805).
 
 ---
 
-## 📥 Installation
+## What is measured
 
-### Windows (Portable - No Installation Required)
+Every leaf is first scaled so that the square root of its area, √A, is 1000 px. All lengths below are fractions
+of √A, so the values do not depend on image resolution or leaf size.
 
-Download the latest Windows build from the
-[**Releases page**](https://github.com/Thornbach/ShapeComplexity/releases/latest).
+1. **Mask.** The largest connected leaf region is kept and scaled to √A = 1000 px.
+2. **Petiole.** Thin parts that a disk of radius 0.03 √A cannot enter are found. The longest of them is removed
+   as the petiole if it is at least 0.10 √A long and at least 4 times longer than wide (axes from second
+   moments). The rest, with holes filled, is L′.
+3. **Outline and blade line.** The outline of L′ is traced and resampled at about 1 px steps. The **blade line**
+   is the outline smoothed with a Gaussian of σ = 0.03 √A along its length. It follows the lobes but not the teeth.
+4. **EA.** The margin profile h(s) is the distance of the outline from the blade line, measured along the blade
+   line. EA is the extra length of this profile per unit blade-line length. A smooth margin gives EA ≈ 0; more or
+   deeper teeth give a larger EA.
+5. **MC.** The blade line is whitened (rescaled so that the blade's spread is the same in every direction, which
+   removes plain elongation) and fitted with elliptic Fourier series of k = 1, 2, … harmonics. e(k) is the fitting error.
+   MC = Σₖ max(0, ln(e(k) / τ)) with τ = 0.015 √A: it adds up how far each fit stays above the tolerance τ.
+   An ellipse gives MC = 0; more lobes give a larger MC.
+6. **Elongation** is the major/minor axis ratio of the blade (from the blade-line polygon). **Petiole length**
+   is given as a fraction of √A (0 = no petiole found).
 
-Extract the archive and double-click `leaf_complex_gui.exe` to start the GUI,
-or run `shapecomplexity_cli.exe` from a terminal for batch processing.
+**Resolution flags.** From √A of the leaf in the input image (`sqrtA_native`): below 250 px both values are
+`not_resolved` and not computed; from 250 to below 500 px EA is `below_recommended` (MC `ok`); from 500 px both are
+`ok`. Teeth need more pixels than lobes.
 
 ---
 
-## 🚀 Quick Start
+## Input
 
-### GUI Application
-1. Download and extract the latest release archive
-2. Double-click `leaf_complex_gui.exe`
-3. Click **File → Open Workspace** and select your image folder
-4. Select images and click **Analyze**
-5. Export results via **File → Export Selected Analysis**
+One leaf per image. If there are several separate regions, the largest one is measured. You must say which
+pixels are leaf; there is no default:
 
-> **Input requirement:** images must be PNGs with a transparent background, and
-> ideally share the same resolution.
+| `--mask-source` | Leaf pixels | Typical input |
+|---|---|---|
+| `alpha` | alpha > 127 (opaque) | cut-outs with a transparent background (PNG). Images without an alpha channel are refused. |
+| `dark` | grey value < 128; transparent pixels never count | binary masks with a dark leaf on a light background (PNG, JPEG, TIFF, BMP) |
+
+`dark` is meant for black-and-white masks. On a photograph it measures whatever falls below the threshold, so
+make a mask first.
 
 ---
 
-## 📊 Output Format
+## Command line
 
-ShapeComplexity generates:
+```bash
+# all images in a folder (add -r for subfolders), results to a CSV file
+shapecomplexity_cli measure leaves/ --mask-source alpha -o results.csv
 
-```
-output/
-├── EC/                    # Edge Complexity visualizations (pink regions = opaque)
-│   └── [filename]_EC.png
-├── MC/                    # Macro-shape Complexity visualizations (pink regions = transparent)
-│   └── [filename]_MC.png
-└── summary/
-    ├── EC_summary.csv     # Edge complexity metrics
-    └── MC_summary.csv     # Macro-shape complexity metrics
+# single files, binary masks
+shapecomplexity_cli measure leaf1.png leaf2.jpg --mask-source dark > results.csv
 ```
 
-**Key Metrics:**
-- Geodesic Edge Complexity (length, curvature, entropy)
-- Approximate Entropy (ApEn) — reported as **EC**, edge complexity
-- Spectral Entropy (SpEn) — reported as **MC**, macro-shape complexity
-- Fractal dimension, circularity, shape index and area
-- Shape indices (length, width, aspect ratio)
+Options: `-o/--output` (default: standard output), `-r/--recursive`, `-j/--threads` (default: all cores).
+Files that fail are reported on standard error and left out of the table; the exit code is then 1.
+
+### Output columns
+
+| Column | Meaning |
+|---|---|
+| `file` | path of the image (relative to the input folder) |
+| `EA` | edge amount (`NA` if not resolved) |
+| `MC` | macro-shape complexity (`NA` if not resolved) |
+| `elongation` | major/minor axis ratio of the blade |
+| `petiole_len` | petiole length / √A (0 = none found) |
+| `sqrtA_native` | √A of the leaf in the input image, px |
+| `EA_flag`, `MC_flag` | `ok`, `below_recommended` or `not_resolved` |
+| `version` | ShapeComplexity version |
+
+`shapecomplexity_cli port-check <manifest.csv> <out.csv> <mask_dir>` runs the check against the Python reference
+implementation (see *Testing*).
 
 ---
 
-## 🔧 Configuration
+## GUI
 
-Edit `config.toml` to customize analysis parameters:
+1. Start `leaf_complex_gui`.
+2. **File → Open Workspace** and choose a folder (subfolders are included).
+3. Choose the **mask source** in the toolbar.
+4. **▶ Analyze** (current image) or **⏩ Analyze All / Selected**.
+5. **File → Export Results** writes one CSV with the same columns as the command line.
 
-```toml
-# Image processing
-resize_dimensions = [512, 512]
-opening_kernel_size = 9
-
-# Reference point calculation
-reference_point_choice = "COM"  # "COM" or "EP"
-
-# Advanced parameters
-adaptive_opening_max_density = 75.0
-enable_petiole_filter_ec = true
-thornfiddle_smoothing_strength = 2.0
-```
-
-See [config.toml](config.toml) for full documentation of all parameters.
+The view shows the normalised mask (grey: L′; orange: removed petiole) with the outline (blue) and the blade
+line (magenta). The right panel shows the values, h(s) and ln(e(k)/τ). Click on the h(s) plot to see that point
+on the leaf.
 
 ---
 
-## 📚 Documentation
-
-- **[config.toml](config.toml)** - Parameter reference with explanations
-
----
-
-## 🧪 Example Workflow
-
-### Academic Research Pipeline
-1. Collect leaf images with transparent backgrounds (PNG)
-2. Organize images by species/treatment in folders
-3. Run batch analysis with CLI tool
-4. Import CSV results into R/Python for statistical analysis
-5. Use GUI for interactive exploration of interesting cases
-
-### Quality Control
-1. Load image set in GUI
-2. Visually inspect EC/MC overlays
-3. Adjust configuration parameters interactively
-4. Re-analyze flagged images
-5. Export final results
-
----
-
-##  Building from Source
-
-If you're on Linux or macOS you may build the tool from source:
+## Building from source
 
 ```bash
 # Install Rust (https://rustup.rs/)
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-
-# Clone repository
 git clone https://github.com/Thornbach/ShapeComplexity.git
 cd ShapeComplexity
 
-# Build CLI
-cargo build --release --bin shapecomplexity_cli
+# Command line
+cargo build --release            # target/release/shapecomplexity_cli
 
-# Build GUI
+# GUI
 cd leaf_complex_gui
-cargo build --release
-
-# Executables will be in target/release/
+cargo build --release            # leaf_complex_gui/target/release/leaf_complex_gui
 ```
 
----
-
-## 📖 Citation
-
-If you use ShapeComplexity in your research, please cite **both** the software
-and the accompanying paper.
-
-**Software:**
-
-```
-Trauden, T., Rakotomalala, A. A. N. A., Junker, R. R., Sauereßig, L.,
-Trauden, K., Muñoz Andres, M., Dannoritzer, R., Farwig, N., & Pinkert, S.
-(2026). ShapeComplexity: entropy-based metrics for quantifying edge- and
-macro-shape complexity (v1.0.0) [Computer software]. Zenodo.
-https://doi.org/10.5281/zenodo.22113804
-```
-
-The DOI above is the **concept DOI**, which always resolves to the newest
-release. To cite the exact version used in the paper, use the version DOI
-[10.5281/zenodo.22113805](https://doi.org/10.5281/zenodo.22113805).
-
-**Paper:**
-
-```
-Trauden, T., Rakotomalala, A. A. N. A., Junker, R. R., Sauereßig, L.,
-Trauden, K., Muñoz Andres, M., Dannoritzer, R., Farwig, N., & Pinkert, S.
-(2026). Introducing entropy-based metrics for quantifying edge- and
-macro-shape complexity in leaves and beyond.
-```
-
-Machine-readable metadata is provided in [CITATION.cff](CITATION.cff).
+The library is the crate `shapecomplexity`: `v2::measure(&mask)` returns the values; `v2::measure_traced(&mask)`
+also returns the intermediate stages (normalised mask, L′, outline, blade line, h(s), e(k)).
 
 ---
 
-## 📄 License
+## Testing
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+`cargo test` runs two sets of tests:
 
----
+- `tests/synthetic.rs`: behaviour on synthetic shapes (circle EA ≈ 0 and MC = 0; ellipses MC = 0 with the right
+  elongation; teeth raise EA; lobes raise MC; resolution flags) and the input paths.
+- `tests/v2_steps.rs`: every step against data files of the Python reference implementation used for the paper,
+  bit for bit, and the whole pipeline on 221 masks (201 synthetic shapes, 20 own oak leaves). The data files are
+  in `tests/fixtures/` of the repository (23 MB) and not in the published crate; the tests skip without them.
 
-## 👤 Author
-
-**Tobias Trauden**
-📧 ToTrauden@proton.me
-
----
-
-## 🐛 Issues & Feedback
-
-Found a bug or have a feature request? Please open an issue on
-[GitHub Issues](https://github.com/Thornbach/ShapeComplexity/issues).
+Each step copies the exact library algorithm of the reference (Pillow 11.0.0, SciPy 1.13.1, scikit-image 0.24.0,
+NumPy 1.26.4). The full check on 3,881 masks requires every value to agree with the reference to within 10⁻⁹.
 
 ---
 
-## 🙏 Acknowledgments
+## Citation
 
-Special thanks to contributors and the Rust community for excellent image processing libraries.
+Please cite the software (concept DOI [10.5281/zenodo.22113804](https://doi.org/10.5281/zenodo.22113804),
+or the version DOI of the release you used) and the accompanying paper. See [CITATION.cff](CITATION.cff).
 
----
+## License
 
-**Version:** 1.0.0
-**Last Updated:** August 2026
-**Status:** Stable Release
+MIT, see [LICENSE](LICENSE).

@@ -6,6 +6,7 @@ use super::{Grid, Mask, PET_ELONG, PET_LEN, R_STAR, SQRT_A, TOL};
 const INF: i64 = i64::MAX / 4;
 
 /// 1-D squared distance transform of a sampled function (Felzenszwalb & Huttenlocher 2012). Exact for integers.
+#[allow(clippy::needless_range_loop)] // several arrays share one index
 fn dt_1d(f: &[i64], out: &mut [i64]) {
     let n = f.len();
     let mut v = vec![0usize; n];
@@ -54,6 +55,7 @@ fn dt_1d(f: &[i64], out: &mut [i64]) {
 
 /// Squared Euclidean distance of every pixel to the nearest pixel where `target` is true.
 /// With no target pixel at all, SciPy measures to a phantom pixel at (-1, 0); this is copied.
+#[allow(clippy::needless_range_loop)]
 pub fn sq_distance_to(target: &Mask) -> Grid<i64> {
     let (rows, cols) = (target.rows, target.cols);
     if !target.data.iter().any(|v| *v) {

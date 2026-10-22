@@ -109,7 +109,7 @@ fn gaussian_unit_cases() {
     let (head, rows) = read_table(&d.join("cases.csv"));
     let (id, s2, s1) = (column(&head, &rows, "id"), column(&head, &rows, "sigma_2d"), column(&head, &rows, "sigma_1d"));
     let mut bad = Vec::new();
-    for i in 0..rows.len() {
+    for i in 0..id.len() {
         let a = read_grid(&d.join(format!("{}_2d_in.csv", id[i])));
         let want = read_grid(&d.join(format!("{}_2d_out.csv", id[i])));
         let ok2 = bits(&gaussian_filter_2d(&a, num(&s2[i])).data) == bits(&want.data);
@@ -131,9 +131,9 @@ fn contour_unit_cases() {
     let (head, rows) = read_table(&d.join("cases.csv"));
     let id = column(&head, &rows, "id");
     let mut bad = Vec::new();
-    for i in 0..rows.len() {
-        let a = read_grid(&d.join(format!("{}_in.csv", id[i])));
-        let (_, out) = read_table(&d.join(format!("{}_out.csv", id[i])));
+    for case in &id {
+        let a = read_grid(&d.join(format!("{}_in.csv", case)));
+        let (_, out) = read_table(&d.join(format!("{}_out.csv", case)));
         let mut want: Vec<Vec<Point>> = Vec::new();
         for r in &out {
             let k = usz(&r[0]);
@@ -144,7 +144,7 @@ fn contour_unit_cases() {
         }
         let got = find_contours(&a, 0.5);
         if got.len() != want.len() || !got.iter().zip(&want).all(|(g, w)| points_equal(g, w)) {
-            bad.push(id[i].clone());
+            bad.push(case.clone());
         }
     }
     assert!(bad.is_empty(), "find_contours differs on cases {bad:?}");
@@ -236,6 +236,7 @@ fn leaf_values() {
             let w: f64 = if want[i].is_empty() { f64::NAN } else { num(&want[i]) };
             let diff = if got.is_nan() && w.is_nan() { 0.0 } else { (got - w).abs() };
             worst = worst.max(if diff.is_nan() { f64::INFINITY } else { diff });
+            #[allow(clippy::neg_cmp_op_on_partial_ord)] // NaN must fail
             if !(diff <= 1e-9) {
                 bad.push(format!("{}: value {got} vs {w}", key[i]));
             }

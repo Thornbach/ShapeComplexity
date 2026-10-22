@@ -1,55 +1,40 @@
 [package]
 name = "shapecomplexity"
-version = "1.0.0"
+version = "2.0.0"
 edition = "2021"
 authors = ["Tobias Trauden <ToTrauden@proton.me>"]
-description = "Entropy-based metrics for quantifying edge and macro-shape complexity of leaves and other biological structures from images"
+description = "Edge amount (EA) and macro-shape complexity (MC) of leaf outlines and other biological shapes from images"
 readme = "README.md"
 license = "MIT"
 repository = "https://github.com/Thornbach/ShapeComplexity"
 homepage = "https://github.com/Thornbach/ShapeComplexity"
-keywords = ["morphometrics", "entropy", "leaf", "ecology", "image"]
+keywords = ["morphometrics", "leaf", "shape", "ecology", "image"]
 categories = ["science", "command-line-utilities"]
+# test data of the Python reference (23 MB); the tests skip when it is missing
+exclude = ["tests/fixtures", "leaf_complex_gui"]
 
-# Library target, also consumed by the GUI crate and by the R bindings
+# Library target, also used by the GUI crate (leaf_complex_gui)
 [lib]
 name = "shapecomplexity"
-crate-type = ["rlib", "cdylib"]
 
 [[bin]]
 name = "shapecomplexity_cli"
 path = "src/main.rs"
 
 [dependencies]
-# Core image processing
+# PNG/JPEG/TIFF/BMP decoding only; every image-processing step is own code (src/v2)
 image = "0.24.7"
-imageproc = "0.23.0"
-
-# Configuration
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-toml = "0.8.0"
 
 # CLI parsing
 clap = { version = "4.4", features = ["derive"] }
 
-# CSV output
-csv = "1.2"
-
-# Error handling
-thiserror = "1.0"
-anyhow = "1.0"
-
-# Optional: parallelism for batch processing
+# Parallel batch processing
 rayon = "1.8"
-
-# Path finding and geometry
-bresenham = "0.1.1"
-nalgebra = "0.32.3"
-
-# Spectral Entropy
-rustfft = "6.1.0"
 
 [profile.release]
 opt-level = 3
 codegen-units = 1
+
+# the tests run the whole pipeline on hundreds of masks
+[profile.test]
+opt-level = 3
