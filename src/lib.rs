@@ -13,6 +13,7 @@ pub mod output;
 pub mod thornfiddle;
 pub mod shape_analysis;
 pub mod gui_api;
+pub mod v2;
 
 // Re-export commonly used types and functions
 pub use errors::{LeafComplexError, Result};
