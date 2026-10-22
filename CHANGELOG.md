@@ -59,16 +59,37 @@ v2.0.0 replaces the v1 method. The numbers of v1.0.0 cannot be reproduced with t
 - GUI morphospace (D114 C): EA–MC scatter of all analysed leaves in a *Morphospace* tab. Colour by subfolder (up to
   three, fixed by name order; with more, one highlighted subfolder, the rest grey); hollow points for leaves with a
   flag other than `ok` or a mask warning; the leaf on screen ringed; hover shows the file, a click opens the leaf.
+- Export of pictures and curves (D114 D, D118, D119; drawing only, no value changes; fixture tests still bit
+  identical). `src/figure.rs`, shared by the CLI and the GUI, writes hand-written SVG (no new dependency):
+  - `figure::leaf_svg`: one leaf in the layout of Fig. 1 of the paper, 190 × 72 mm: (a) mask, removed petiole,
+    filled holes, blade line and zoom window; (b) margin band in the zoom window (side 10 × the 95th percentile of
+    |h|, 100–400 px, on the stretch where h(s) has the most extra length); (c) h(s) → EA; (d) whitened blade line
+    and its fits with 1, 3 and 8 harmonics; (e) e(k) against τ, shaded area = MC; values, flags and version in the
+    header. Colours of the paper figures.
+  - `figure::margin_profile_csv` (`s,h`) and `figure::error_curve_csv` (`k,e`), all in units of √A.
+  - `figure::morphospace_svg`: EA–MC scatter, colour by subfolder as in the GUI tab (light-surface colours);
+    `figure::group_of`, `group_slot` (the colour rule, also used by the GUI tab), `arc_length`.
+  - CLI `measure`: `--figures <dir>` (`<file>[_leaf<n>].svg`), `--curves <dir>` (`<file>[_leaf<n>]_hs.csv`,
+    `_ek.csv`), keeping the input's subfolders; `--morphospace <file.svg>` and `--highlight <subfolder>` (colours
+    one subfolder when there are more than three). Two inputs that would write files of the same name (e.g.
+    `a.png` and `a.jpg`) stop the run before measuring.
+  - GUI: *File → Export Figure of This Leaf*, *Export Figures*, *Export Curves* (selected or all analysed images,
+    in the background), *Export Morphospace* (with the subfolder highlighted in the tab). The GUI now keeps the
+    outline and blade line in the frame of the trace (f64) and rebuilds the trace for the export, so its files are
+    byte for byte those of the command line (`leaf_complex_gui/tests/export.rs`).
+  - Library: `batch::LeafExport`, `leaf_stem`, `leaf_title`, `name_clash`, `flagged`, `write_file`.
 - GUI usability (Tobias's click-test, s38): plots in the right panel no longer take the mouse wheel (the panel
   scrolls); margin band on by default; *Analyze* is a large accent button, and an empty view shows a large
-  *Analyze this image* button.
+  *Analyze this image* button. Fix (s39): the *Done* and *Error* message windows froze the app when *OK* was
+  clicked (the state lock taken in the `if let` line was still held when the button took it again).
 - `tests/synthetic.rs`: synthetic shapes (circle EA ≈ 0, MC = 0, elongation 1, no petiole; ellipses MC = 0 and
   elongation = aspect ratio within 2 %; teeth raise EA; lobes raise MC; flags at √A = 200, 300, 600 px), the `alpha`
   and `dark` inputs give identical values, the results row; `efd_reconstruct` gives e(1) of the error curve (relative
   difference < 10⁻⁹); the placement maps the outline back onto the input (every point < 1 px from a leaf edge) and
   counts dropped pixels exactly; the mask-check thresholds; several leaves (two leaves kept and a small one
   dropped, the largest gives the default values bit for bit, centroid and crop in the image frame; fallback to the
-  largest small region) and the optional columns.
+  largest small region) and the optional columns; the curve tables hold the trace values exactly, the leaf figure
+  for a resolved and an unresolved leaf, export file names, the morphospace count and colours.
 - `tests/v2_steps.rs` and `tests/fixtures/`: every step against fixtures of the reference (bit for bit), and the
   whole pipeline on 221 masks (201 synthetic shapes, 20 own oak leaves). The fixtures are excluded from the
   published crate; the tests skip without them.

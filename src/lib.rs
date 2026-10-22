@@ -1,9 +1,11 @@
 // src/lib.rs - ShapeComplexity library: edge amount (EA) and macro-shape complexity (MC) of leaf outlines
 //
-// `v2` holds the method; `batch` the parts shared by the CLI and the GUI; `gui_api` an egui-free entry point
-// for front-ends. One pipeline function, `v2::measure_traced`, serves all of them.
+// `v2` holds the method; `batch` the parts shared by the CLI and the GUI; `figure` the SVG pictures and curve tables
+// of a measurement; `gui_api` an egui-free entry point for front-ends. One pipeline function, `v2::measure_traced`,
+// serves all of them.
 
 pub mod batch;
+pub mod figure;
 pub mod gui_api;
 pub mod v2;
 

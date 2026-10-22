@@ -3,9 +3,11 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use eframe::egui;
-use shapecomplexity::batch::{image_files, MaskCheck};
-use shapecomplexity::v2::{Flag, Placement};
-use shapecomplexity::{MaskSource, Measurement};
+use shapecomplexity::batch::{flagged, image_files, MaskCheck};
+use shapecomplexity::figure::{group_of, MorphPoint};
+use shapecomplexity::v2::contour::Point;
+use shapecomplexity::v2::{Flag, Grid, Placement, PAD_CONTOUR};
+use shapecomplexity::{MaskSource, Measurement, Trace};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum AnalysisStatus {
@@ -44,6 +46,13 @@ impl PackedMask {
     }
 }
 
+/// A point of the outline or blade line (row, col in the frame of the trace) as (x, y) in pixel units of the mask
+/// picture (0 = left/top edge).
+pub fn xy(p: &Point) -> [f32; 2] {
+    let off = 0.5 - PAD_CONTOUR as f64;
+    [(p[1] + off) as f32, (p[0] + off) as f32]
+}
+
 /// What the GUI keeps of one analysed leaf.
 #[derive(Clone)]
 pub struct AnalysisResult {
@@ -57,9 +66,9 @@ pub struct AnalysisResult {
     pub source: MaskSource,
     pub measurement: Measurement,
     pub mask: PackedMask,
-    /// Outline and blade line as (x, y) in pixel units of the mask picture.
-    pub outline: Vec<[f32; 2]>,
-    pub blade_line: Vec<[f32; 2]>,
+    /// Outline and blade line as in the trace (row, col, padded frame; [`xy`] maps them onto the mask picture).
+    pub outline: Vec<Point>,
+    pub blade_line: Vec<Point>,
     /// h(s), px, one value per outline point.
     pub margin_profile: Vec<f64>,
     /// e(k) / sqrt(A), k = 1, 2, ...; empty if MC was not computed.
@@ -85,6 +94,34 @@ impl AnalysisResult {
         v.extend(self.check.warnings());
         v
     }
+
+    /// The trace of the measurement, rebuilt from what the GUI keeps (for the figure and curve export; the same
+    /// files as the command line writes).
+    pub fn trace(&self) -> Trace {
+        let (w, h) = (self.mask.width, self.mask.height);
+        let classes: Vec<u8> = (0..w * h).map(|i| self.mask.class(i)).collect();
+        let grid = |keep: [u8; 2]| Grid::from_vec(h, w, classes.iter().map(|c| keep.contains(c)).collect());
+        Trace {
+            norm: grid([CLASS_LEAF, CLASS_REMOVED]),
+            lp: grid([CLASS_LEAF, CLASS_FILLED]),
+            outline: self.outline.clone(),
+            blade_line: self.blade_line.clone(),
+            margin_profile: self.margin_profile.clone(),
+            error_curve: self.error_curve.clone(),
+            white: self.white.clone(),
+            placement: self.placement.clone(),
+        }
+    }
+}
+
+/// One analysed leaf in the morphospace: where it is and its point.
+pub struct MorphEntry {
+    /// Index of the image and of the leaf in its results.
+    pub image: usize,
+    pub leaf: usize,
+    /// File label, with the leaf number when the image has several leaves.
+    pub label: String,
+    pub point: MorphPoint,
 }
 
 /// Input image on screen (at most 2048 px a side) and its full size (width, height); Err if it could not be read.
@@ -347,5 +384,37 @@ impl AppState {
 
     pub fn selected_count(&self) -> usize {
         self.images.iter().filter(|img| img.selected).count()
+    }
+
+    /// Analysed images to export, with their leaves: the selected ones, or all if none is selected.
+    pub fn export_set(&self) -> Vec<(&ImageInfo, &[AnalysisResult])> {
+        let selected = self.selected_count() > 0;
+        self.images
+            .iter()
+            .filter(|img| !selected || img.selected)
+            .filter_map(|img| self.analysis_results.get(&img.path).map(|v| (img, v.as_slice())))
+            .collect()
+    }
+
+    /// Every analysed leaf as a morphospace point, also those without EA or MC.
+    pub fn morph_entries(&self) -> Vec<MorphEntry> {
+        let mut out = Vec::new();
+        for (i, img) in self.images.iter().enumerate() {
+            let leaves = self.analysis_results.get(&img.path).map_or(&[][..], |v| v.as_slice());
+            for (j, r) in leaves.iter().enumerate() {
+                out.push(MorphEntry {
+                    image: i,
+                    leaf: j,
+                    label: if leaves.len() > 1 { format!("{}, leaf {}", img.label, r.leaf) } else { img.label.clone() },
+                    point: MorphPoint {
+                        ea: r.measurement.ea,
+                        mc: r.measurement.mc,
+                        group: group_of(&img.label).to_string(),
+                        flagged: flagged(&r.measurement, &r.check),
+                    },
+                });
+            }
+        }
+        out
     }
 }

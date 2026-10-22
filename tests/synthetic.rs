@@ -8,7 +8,11 @@
 use std::f64::consts::PI;
 use std::path::PathBuf;
 
-use shapecomplexity::batch::{csv_row, grey_share_of, measure_file, measure_file_leaves, Columns, MaskCheck, CSV_HEADER};
+use shapecomplexity::batch::{
+    csv_row, grey_share_of, leaf_stem, leaf_title, measure_file, measure_file_leaves, name_clash, Columns, MaskCheck,
+    CSV_HEADER,
+};
+use shapecomplexity::figure::{arc_length, error_curve_csv, leaf_svg, margin_profile_csv, morphospace_svg, MorphPoint};
 use shapecomplexity::v2::fill::polygon_fill;
 use shapecomplexity::v2::metrics::efd_reconstruct;
 use shapecomplexity::v2::{flags, measure, measure_traced, Flag, Grid, Mask, MaskSource, Measurement, PAD_CONTOUR, SQRT_A};
@@ -390,4 +394,83 @@ fn optional_columns() {
     assert_eq!(Columns::default().row("leaf.png", &default[0]), csv_row("leaf.png", &default[0].measurement, MaskSource::Dark));
     // the same leaf, with and without the option: identical values
     assert_eq!(f[4..9].join(","), csv_row("x", &default[0].measurement, MaskSource::Dark).split(',').skip(1).take(5).collect::<Vec<_>>().join(","));
+}
+
+// --- export (D118, D119): drawing and tables only, no value changes -----------------------------------------------
+
+/// Parse a two-column table with a header.
+fn table(text: &str, header: &str) -> Vec<(f64, f64)> {
+    let mut lines = text.lines();
+    assert_eq!(lines.next(), Some(header));
+    lines
+        .map(|l| {
+            let (a, b) = l.split_once(',').unwrap();
+            (a.parse().unwrap(), b.parse().unwrap())
+        })
+        .collect()
+}
+
+#[test]
+fn curve_tables_hold_the_trace_values() {
+    let (m, t) = measure_traced(&render(&arc_teeth(&polar(5.0, 0.2, 0.0, 0.0), 0.01), 600.0)).unwrap();
+    let hs = table(&margin_profile_csv(&t), "s,h");
+    assert_eq!(hs.len(), t.margin_profile.len());
+    let s = arc_length(&t.blade_line);
+    for (i, (si, hi)) in hs.iter().enumerate() {
+        // the text form of an f64 reads back exactly
+        assert_eq!(*hi, t.margin_profile[i] / SQRT_A);
+        assert_eq!(*si, s[i] / SQRT_A);
+    }
+    assert_eq!(hs[0].0, 0.0);
+    assert!(hs.windows(2).all(|w| w[1].0 >= w[0].0));
+    let ek = table(&error_curve_csv(&t), "k,e");
+    assert_eq!(ek.len(), t.error_curve.len());
+    for (i, (k, e)) in ek.iter().enumerate() {
+        assert_eq!((*k, *e), ((i + 1) as f64, t.error_curve[i]));
+    }
+    assert!(m.mc > 0.0);
+}
+
+#[test]
+fn leaf_figure_draws_every_panel() {
+    let (m, t) = measure_traced(&render(&arc_teeth(&polar(5.0, 0.2, 0.0, 0.0), 0.01), 600.0)).unwrap();
+    let svg = leaf_svg("oak/leaf <1> & co", &m, &t);
+    assert!(svg.starts_with("<svg xmlns=\"http://www.w3.org/2000/svg\""));
+    assert!(svg.ends_with("</svg>\n"));
+    for want in ["(a)", "(b)", "(c)", "(d)", "(e)", "oak/leaf &lt;1&gt; &amp; co", &format!("EA = {:.3}", m.ea), &format!("MC = {:.2}", m.mc)] {
+        assert!(svg.contains(want), "{want}");
+    }
+    assert!(!svg.contains("NaN") && !svg.contains("inf"));
+    // a leaf too small for MC: (e) says so, the e(k) table is empty, EA is NA
+    let (small, ts) = measure_traced(&render(&polar(5.0, 0.2, 0.0, 0.0), 200.0)).unwrap();
+    assert_eq!(small.mc_flag, Flag::NotResolved);
+    let svg = leaf_svg("small", &small, &ts);
+    assert!(svg.contains("MC not computed") && svg.contains("EA = NA"));
+    assert!(!svg.contains("NaN"));
+    assert_eq!(error_curve_csv(&ts), "k,e\n");
+}
+
+#[test]
+fn export_file_names() {
+    assert_eq!(leaf_stem("oak/a.png", None), "oak/a");
+    assert_eq!(leaf_stem("oak/a.png", Some(2)), "oak/a_leaf2");
+    assert_eq!(leaf_stem("dir.v2/a", None), "dir.v2/a");
+    assert_eq!(leaf_stem("x/.hidden", None), "x/.hidden");
+    assert_eq!(leaf_stem("a.b.tif", None), "a.b");
+    assert_eq!(leaf_title("oak/a.png", Some(3)), "oak/a.png, leaf 3");
+    assert!(name_clash(["oak/a.png", "oak/a.jpg"]).is_some());
+    assert!(name_clash(["oak/a.png", "elm/a.png", "a.png"]).is_none());
+}
+
+#[test]
+fn morphospace_counts_leaves_without_values() {
+    let p = |ea: f64, mc: f64, g: &str| MorphPoint { ea, mc, group: g.into(), flagged: false };
+    let svg = morphospace_svg(&[p(0.1, 2.0, "a"), p(0.2, 5.0, "b"), p(f64::NAN, 1.0, "a")], None);
+    assert!(svg.contains("2 leaves; 1 not shown"));
+    assert!(!svg.contains("NaN"));
+    // more than three subfolders: only the highlighted one in colour
+    let many: Vec<MorphPoint> = (0..5).map(|i| p(0.1 * i as f64, i as f64, &format!("g{i}"))).collect();
+    let svg = morphospace_svg(&many, Some("g3"));
+    assert_eq!(svg.matches("fill=\"#2a78d6\"").count(), 2); // the point and its legend key
+    assert!(svg.contains("other subfolders (4)"));
 }

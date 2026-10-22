@@ -7,9 +7,10 @@ use std::time::Instant;
 
 use rayon::prelude::*;
 
+use crate::figure::{error_curve_csv, leaf_svg, margin_profile_csv};
 use crate::v2::{
     leaf_regions, load_alpha_mask, load_normalised_mask, mask_from_image, measure_normalised_traced, measure_traced,
-    normalise, Mask, MaskSource, Measurement, Trace,
+    normalise, Flag, Mask, MaskSource, Measurement, Trace,
 };
 
 /// Version written into every results row.
@@ -163,6 +164,82 @@ pub fn measure_file(path: &Path, source: MaskSource) -> Result<(Measurement, Tra
     let (mut leaves, check) = measure_file_leaves(path, source, false)?;
     let leaf = leaves.remove(0);
     Ok((leaf.measurement, leaf.trace, check))
+}
+
+/// Flag other than ok or a mask-check warning: a leaf to look at again (hollow in the morphospace).
+pub fn flagged(m: &Measurement, check: &MaskCheck) -> bool {
+    m.ea_flag != Flag::Ok || m.mc_flag != Flag::Ok || !check.warnings().is_empty()
+}
+
+// --- per-leaf files (D118, D119) --------------------------------------------------------------------------------
+
+/// Name of a leaf's files without extension (D119): `rel` (the image's path relative to its input folder, `/`
+/// separators, or its file name) without the extension, plus `_leaf<n>` when every leaf of the image was measured.
+pub fn leaf_stem(rel: &str, leaf: Option<usize>) -> String {
+    let stem = match rel.rsplit_once('.') {
+        Some((s, ext)) if !ext.contains('/') && !s.is_empty() && !s.ends_with('/') => s,
+        _ => rel,
+    };
+    match leaf {
+        Some(i) => format!("{stem}_leaf{i}"),
+        None => stem.to_string(),
+    }
+}
+
+/// Error message if two images would write files of the same name (`rel` as in [`leaf_stem`]), e.g. `a.png` and
+/// `a.jpg` in one folder.
+pub fn name_clash<'a>(rels: impl IntoIterator<Item = &'a str>) -> Option<String> {
+    let mut seen = std::collections::HashMap::new();
+    for rel in rels {
+        let stem = leaf_stem(rel, None);
+        if let Some(other) = seen.insert(stem.clone(), rel) {
+            return Some(format!("{other} and {rel} would write files of the same name ({stem}); rename one"));
+        }
+    }
+    None
+}
+
+/// Title of a leaf's figure: the `file` label, plus the leaf number when every leaf of the image was measured.
+pub fn leaf_title(label: &str, leaf: Option<usize>) -> String {
+    match leaf {
+        Some(i) => format!("{label}, leaf {i}"),
+        None => label.to_string(),
+    }
+}
+
+/// Folders for the per-leaf files; None = not written.
+#[derive(Clone, Debug, Default)]
+pub struct LeafExport {
+    /// Fig. 1-style SVG per leaf: `<stem>.svg`.
+    pub figures: Option<PathBuf>,
+    /// Curve tables per leaf: `<stem>_hs.csv` (s, h) and `<stem>_ek.csv` (k, e).
+    pub curves: Option<PathBuf>,
+}
+
+impl LeafExport {
+    pub fn is_empty(&self) -> bool {
+        self.figures.is_none() && self.curves.is_none()
+    }
+
+    /// Write the files of one leaf; subfolders of `stem` are created.
+    pub fn write(&self, stem: &str, title: &str, m: &Measurement, t: &Trace) -> Result<(), String> {
+        if let Some(dir) = &self.figures {
+            write_file(&dir.join(format!("{stem}.svg")), &leaf_svg(title, m, t))?;
+        }
+        if let Some(dir) = &self.curves {
+            write_file(&dir.join(format!("{stem}_hs.csv")), &margin_profile_csv(t))?;
+            write_file(&dir.join(format!("{stem}_ek.csv")), &error_curve_csv(t))?;
+        }
+        Ok(())
+    }
+}
+
+/// Write a text file, creating its folder.
+pub fn write_file(path: &Path, text: &str) -> Result<(), String> {
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
+    fs::write(path, text).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 /// Header of the results table.

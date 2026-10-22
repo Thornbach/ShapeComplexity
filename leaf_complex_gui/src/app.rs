@@ -5,7 +5,8 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use shapecomplexity::batch::Columns;
+use shapecomplexity::batch::{leaf_stem, leaf_title, name_clash, write_file, Columns, LeafExport};
+use shapecomplexity::figure::{leaf_svg, morphospace_svg};
 
 use crate::analysis::AnalysisEngine;
 use crate::state::{AnalysisStatus, AppState};
@@ -49,6 +50,22 @@ impl LeafComplexApp {
                 if ui.button("💾 Export Results...").clicked() {
                     ui.close_menu();
                     self.export_results();
+                }
+                if ui.button("🖼 Export Figure of This Leaf...").clicked() {
+                    ui.close_menu();
+                    self.export_figure();
+                }
+                if ui.button("🖼 Export Figures...").clicked() {
+                    ui.close_menu();
+                    self.export_leaf_files(true);
+                }
+                if ui.button("📈 Export Curves...").clicked() {
+                    ui.close_menu();
+                    self.export_leaf_files(false);
+                }
+                if ui.button("📊 Export Morphospace...").clicked() {
+                    ui.close_menu();
+                    self.export_morphospace();
                 }
 
                 ui.separator();
@@ -237,12 +254,9 @@ impl LeafComplexApp {
         let (rows, cols): (Vec<String>, Columns) = {
             let g = self.state.lock().unwrap();
             let cols = Columns { leaves: g.all_leaves, px_per_mm: g.px_per_mm };
-            let selected = g.selected_count() > 0;
             let rows = g
-                .images
-                .iter()
-                .filter(|img| !selected || img.selected)
-                .filter_map(|img| g.analysis_results.get(&img.path).map(|v| (img, v)))
+                .export_set()
+                .into_iter()
                 .flat_map(|(img, v)| v.iter().map(|r| cols.row_of(&img.label, r.leaf, r.centroid, r.px, r.source, &r.measurement)))
                 .collect();
             (rows, cols)
@@ -267,6 +281,123 @@ impl LeafComplexApp {
         match fs::write(&path, text) {
             Ok(()) => g.last_message = Some(format!("Exported {} rows to {}", rows.len(), path.display())),
             Err(e) => g.last_error = Some(format!("Failed to write {}: {e}", path.display())),
+        }
+    }
+
+    /// Fig. 1-style SVG of the leaf on screen (the file `--figures` writes for it).
+    fn export_figure(&mut self) {
+        let job = {
+            let g = self.state.lock().unwrap();
+            match (g.current_image(), g.current_result()) {
+                (Some(img), Some(r)) => {
+                    let n = g.all_leaves.then_some(r.leaf);
+                    let name = img.label.rsplit('/').next().unwrap_or(&img.label);
+                    Some((leaf_stem(name, n), leaf_title(&img.label, n), r.measurement.clone(), r.trace()))
+                }
+                _ => None,
+            }
+        };
+        let Some((stem, title, m, trace)) = job else {
+            self.state.lock().unwrap().last_error = Some("No analysed leaf on screen.".to_string());
+            return;
+        };
+        let Some(path) = rfd::FileDialog::new()
+            .set_title("Save Figure")
+            .set_file_name(format!("{stem}.svg"))
+            .add_filter("SVG", &["svg"])
+            .save_file()
+        else {
+            return;
+        };
+        let res = write_file(&path, &leaf_svg(&title, &m, &trace));
+        let mut g = self.state.lock().unwrap();
+        match res {
+            Ok(()) => g.last_message = Some(format!("Saved {}", path.display())),
+            Err(e) => g.last_error = Some(format!("Failed to write {e}")),
+        }
+    }
+
+    /// Figures (`figures`) or curve tables of the selected (or all) analysed leaves into a folder, keeping the
+    /// workspace's subfolders: the files `--figures` / `--curves` write. Runs in the background.
+    fn export_leaf_files(&mut self, figures: bool) {
+        // (image path, leaf index, file stem, title)
+        let jobs: Vec<(PathBuf, usize, String, String)> = {
+            let g = self.state.lock().unwrap();
+            let set = g.export_set();
+            if let Some(e) = name_clash(set.iter().map(|(img, _)| img.label.as_str())) {
+                drop(set);
+                drop(g);
+                self.state.lock().unwrap().last_error = Some(e);
+                return;
+            }
+            set.iter()
+                .flat_map(|(img, leaves)| {
+                    leaves.iter().enumerate().map(|(i, r)| {
+                        let n = g.all_leaves.then_some(r.leaf);
+                        (img.path.clone(), i, leaf_stem(&img.label, n), leaf_title(&img.label, n))
+                    })
+                })
+                .collect()
+        };
+        if jobs.is_empty() {
+            self.state.lock().unwrap().last_error = Some("No analysed images to export.".to_string());
+            return;
+        }
+        let what = if figures { "Figures" } else { "Curves" };
+        let Some(dir) = rfd::FileDialog::new().set_title(format!("Folder for the {}", what.to_lowercase())).pick_folder()
+        else {
+            return;
+        };
+        let export = if figures {
+            LeafExport { figures: Some(dir.clone()), curves: None }
+        } else {
+            LeafExport { figures: None, curves: Some(dir.clone()) }
+        };
+        let state = Arc::clone(&self.state);
+        state.lock().unwrap().last_message = Some(format!("Exporting {} leaves...", jobs.len()));
+        thread::spawn(move || {
+            let mut failed = Vec::new();
+            for (path, i, stem, title) in &jobs {
+                let leaf = {
+                    let g = state.lock().unwrap();
+                    g.analysis_results.get(path).and_then(|v| v.get(*i)).map(|r| (r.measurement.clone(), r.trace()))
+                };
+                let Some((m, trace)) = leaf else { continue };
+                if let Err(e) = export.write(stem, title, &m, &trace) {
+                    failed.push(e);
+                }
+            }
+            let mut g = state.lock().unwrap();
+            match failed.first() {
+                None => g.last_message = Some(format!("{what} of {} leaves saved in {}", jobs.len(), dir.display())),
+                Some(e) => g.last_error = Some(format!("{} of {} files failed: {e}", failed.len(), jobs.len())),
+            }
+        });
+    }
+
+    /// EA-MC morphospace of all analysed leaves as SVG, coloured as in the tab (the file `--morphospace` writes).
+    fn export_morphospace(&mut self) {
+        let (points, highlight) = {
+            let g = self.state.lock().unwrap();
+            (g.morph_entries().into_iter().map(|e| e.point).collect::<Vec<_>>(), g.highlight.clone())
+        };
+        if points.is_empty() {
+            self.state.lock().unwrap().last_error = Some("No analysed leaves yet.".to_string());
+            return;
+        }
+        let Some(path) = rfd::FileDialog::new()
+            .set_title("Save Morphospace")
+            .set_file_name("morphospace.svg")
+            .add_filter("SVG", &["svg"])
+            .save_file()
+        else {
+            return;
+        };
+        let res = write_file(&path, &morphospace_svg(&points, highlight.as_deref()));
+        let mut g = self.state.lock().unwrap();
+        match res {
+            Ok(()) => g.last_message = Some(format!("Saved {}", path.display())),
+            Err(e) => g.last_error = Some(format!("Failed to write {e}")),
         }
     }
 }
@@ -304,7 +435,10 @@ impl eframe::App for LeafComplexApp {
             self.analyze_all_images(ctx);
         }
 
-        if let Some(error) = self.state.lock().unwrap().last_error.clone() {
+        // copy first: a guard in the `if let` line would stay locked for the whole block (Rust 2021), and the OK
+        // button's lock would then wait for it forever
+        let error = self.state.lock().unwrap().last_error.clone();
+        if let Some(error) = error {
             egui::Window::new("⚠️ Error").collapsible(false).resizable(false).show(ctx, |ui| {
                 ui.label(&error);
                 if ui.button("OK").clicked() {
@@ -313,7 +447,8 @@ impl eframe::App for LeafComplexApp {
             });
         }
 
-        if let Some(msg) = self.state.lock().unwrap().last_message.clone() {
+        let msg = self.state.lock().unwrap().last_message.clone();
+        if let Some(msg) = msg {
             egui::Window::new("Done").collapsible(false).resizable(false).show(ctx, |ui| {
                 ui.label(&msg);
                 if ui.button("OK").clicked() {

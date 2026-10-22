@@ -5,6 +5,7 @@ use eframe::egui;
 use image::imageops;
 use shapecomplexity::gui_api::{analyze_leaves, FILLED_RGBA, LEAF_RGBA, REMOVED_RGBA};
 use shapecomplexity::v2::fill::polygon_fill;
+use shapecomplexity::v2::PAD_CONTOUR;
 use shapecomplexity::MaskSource;
 
 use crate::state::{AnalysisResult, PackedMask, CLASS_BACKGROUND, CLASS_FILLED, CLASS_LEAF, CLASS_REMOVED};
@@ -56,8 +57,8 @@ impl AnalysisEngine {
                     source: r.source,
                     measurement: r.measurement,
                     mask: PackedMask::from_classes(norm.cols, norm.rows, classes),
-                    outline: r.outline_xy,
-                    blade_line: r.blade_line_xy,
+                    outline: r.trace.outline,
+                    blade_line: r.trace.blade_line,
                     margin_profile: r.trace.margin_profile,
                     error_curve: r.trace.error_curve,
                     white: r.trace.white,
@@ -80,10 +81,11 @@ impl Default for AnalysisEngine {
 /// Background transparent.
 pub fn mask_texture(r: &AnalysisResult, band: bool, name: String, ctx: &egui::Context) -> egui::TextureHandle {
     let mask = &r.mask;
-    // blade line: picture coordinates (pixel edges) -> pixel centres
+    // blade line: padded trace frame -> pixel centres of the mask
     let inside = band.then(|| {
-        let xs: Vec<f64> = r.blade_line.iter().map(|p| p[0] as f64 - 0.5).collect();
-        let ys: Vec<f64> = r.blade_line.iter().map(|p| p[1] as f64 - 0.5).collect();
+        let pad = PAD_CONTOUR as f64;
+        let xs: Vec<f64> = r.blade_line.iter().map(|p| p[1] - pad).collect();
+        let ys: Vec<f64> = r.blade_line.iter().map(|p| p[0] - pad).collect();
         polygon_fill(mask.width, mask.height, &xs, &ys)
     });
     let mut rgba = Vec::with_capacity(mask.width * mask.height * 4);

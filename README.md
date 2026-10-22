@@ -96,6 +96,27 @@ Optional columns: with `--all-leaves`, `leaf` (1, 2, …), `leaf_x` and `leaf_y`
 pixels, 0 = left/top edge of the image) follow `file`; with `--px-per-mm`, `area_mm2` (pixels of the measured
 region, petiole included, / scale²) follows `sqrtA_native`.
 
+### Pictures and curves
+
+```bash
+# one Fig. 1-style picture and the two curve tables per leaf, and the morphospace of all leaves
+shapecomplexity_cli measure leaves/ -r -o results.csv --figures figs/ --curves curves/ --morphospace morphospace.svg
+```
+
+- `--figures <dir>`: one SVG per leaf in the layout of Fig. 1 of the paper: (a) mask, removed petiole, blade line;
+  (b) zoom on the margin band; (c) margin profile h(s) and EA; (d) whitened blade line and its Fourier fits with 1,
+  3 and 8 harmonics; (e) fit error e(k) against τ, shaded area = MC.
+- `--curves <dir>`: per leaf `<name>_hs.csv` (columns `s`, `h`: arc length along the blade line and the margin
+  profile) and `<name>_ek.csv` (columns `k`, `e`: error of the k-harmonic fit), all in units of √A. The e(k)
+  table ends where the stop rule ended the fit; it is empty if MC was not computed.
+- `--morphospace <file.svg>`: EA against MC for all measured leaves, coloured by subfolder (one colour each for up
+  to three; with more, `--highlight <subfolder>` colours one and the rest are grey). Hollow points: a flag other
+  than `ok` or a mask warning.
+
+File names follow the input: `leaves/oak/l01.png` gives `figs/oak/l01.svg`, `curves/oak/l01_hs.csv` and
+`curves/oak/l01_ek.csv`; with `--all-leaves`, `_leaf<n>` is added (`figs/oak/l01_leaf2.svg`). A file given directly
+uses its file name only.
+
 `shapecomplexity_cli port-check <manifest.csv> <out.csv> <mask_dir>` runs the check against the Python reference
 implementation (see *Testing*).
 
@@ -107,7 +128,10 @@ implementation (see *Testing*).
 2. **File → Open Workspace** and choose a folder (subfolders are included).
 3. **▶ Analyze** (current image; also the large button in the empty view) or **⏩ Analyze All / Selected**.
 4. Optional: the mask source in the toolbar (*auto* by default; *alpha* or *dark* force a rule).
-5. **File → Export Results** writes one CSV with the same columns as the command line.
+5. **File → Export Results** writes one CSV with the same columns as the command line. *Export Figure of This
+   Leaf*, *Export Figures*, *Export Curves* and *Export Morphospace* write the same files as `--figures`, `--curves`
+   and `--morphospace` (selected images, or all analysed images if none is selected; the morphospace uses the
+   subfolder highlighted in its tab).
 
 *All leaves* and *px/mm* in the toolbar work as `--all-leaves` and `--px-per-mm`. With several leaves, pick one
 with the *Leaf* buttons; the input view shows the leaf numbers.
@@ -157,7 +181,8 @@ fit; `batch::measure_file` adds the mask check.
 `cargo test` runs two sets of tests:
 
 - `tests/synthetic.rs`: behaviour on synthetic shapes (circle EA ≈ 0 and MC = 0; ellipses MC = 0 with the right
-  elongation; teeth raise EA; lobes raise MC; resolution flags) and the input paths.
+  elongation; teeth raise EA; lobes raise MC; resolution flags), the input paths, and the exported curve tables and pictures.
+  `leaf_complex_gui/tests/export.rs` checks that the GUI writes the same files as the command line.
 - `tests/v2_steps.rs`: every step against data files of the Python reference implementation used for the paper,
   bit for bit, and the whole pipeline on 221 masks (201 synthetic shapes, 20 own oak leaves). The data files are
   in `tests/fixtures/` of the repository (23 MB) and not in the published crate; the tests skip without them.

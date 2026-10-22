@@ -7,12 +7,14 @@ use egui_plot::{Bar, BarChart, HLine, Line, LineStyle, Plot, PlotPoints, Points,
 use std::sync::{Arc, Mutex};
 
 use shapecomplexity::batch::VERSION;
+use shapecomplexity::figure::{arc_length, group_name, group_slot};
+use shapecomplexity::v2::contour::Point;
 use shapecomplexity::v2::metrics::efd_reconstruct;
 use shapecomplexity::v2::{K_MAX, SQRT_A, TAU};
 use shapecomplexity::MaskSource;
 
 use crate::analysis::{input_texture, mask_texture};
-use crate::state::{AnalysisStatus, AppState, CentralView, ViewMode};
+use crate::state::{xy, AnalysisStatus, AppState, CentralView, MorphEntry, ViewMode};
 
 // colours of Fig. 1 (analysis/figures/style.py)
 const INK: egui::Color32 = egui::Color32::from_rgb(11, 11, 11);
@@ -213,7 +215,10 @@ pub fn render_image_view(
                     painter.image(tex.id(), mask_rect, uv, egui::Color32::WHITE);
                 }
             }
-            let pt = |p: &[f32; 2]| to_screen(to_content(p[0], p[1]));
+            let pt = |p: &Point| {
+                let [x, y] = xy(p);
+                to_screen(to_content(x, y))
+            };
             let width = (1.5 * g.zoom_level).clamp(1.0, 3.0);
             if g.show_outline {
                 let colour = if input.is_some() { OVERLAY_OUTLINE } else { INK };
@@ -364,18 +369,6 @@ pub fn render_results_panel(ui: &mut egui::Ui, state: &Arc<Mutex<AppState>>) {
     }
 }
 
-/// Arc length along the blade line at each point, in units of sqrt(A).
-fn arc_length(bl: &[[f32; 2]]) -> Vec<f64> {
-    let mut s = Vec::with_capacity(bl.len() + 1);
-    s.push(0.0);
-    for i in 0..bl.len() {
-        let (a, b) = (bl[i], bl[(i + 1) % bl.len()]);
-        let d = ((b[0] - a[0]) as f64).hypot((b[1] - a[1]) as f64);
-        s.push(s[i] + d / SQRT_A);
-    }
-    s
-}
-
 pub fn render_margin_plot(ui: &mut egui::Ui, state: &Arc<Mutex<AppState>>) {
     ui.heading("📊 (c) Margin profile h(s) and EA");
     let (h, s, ea, selected, runs) = {
@@ -383,7 +376,7 @@ pub fn render_margin_plot(ui: &mut egui::Ui, state: &Arc<Mutex<AppState>>) {
         match g.current_result() {
             Some(r) => (
                 r.margin_profile.iter().map(|v| v / SQRT_A).collect::<Vec<f64>>(),
-                arc_length(&r.blade_line),
+                arc_length(&r.blade_line).iter().map(|v| v / SQRT_A).collect::<Vec<f64>>(),
                 r.measurement.ea,
                 g.selected_point,
                 g.visible_runs.clone(),
@@ -543,57 +536,24 @@ const GROUP_COLORS: [egui::Color32; 3] = [
 ];
 const OTHER_COLOR: egui::Color32 = egui::Color32::from_rgb(154, 152, 144);
 
-/// Subfolder of a file label ("" for files in the workspace folder itself).
-fn group_of(label: &str) -> &str {
-    label.rsplit_once('/').map_or("", |(dir, _)| dir)
-}
-
-/// One point of the morphospace.
-struct MorphPoint {
-    image: usize,
-    leaf: usize,
-    ea: f64,
-    mc: f64,
-    group: String,
-    label: String,
-    flagged: bool,
-}
-
 pub fn render_morphospace(ui: &mut egui::Ui, state: &Arc<Mutex<AppState>>) {
     ui.heading("📊 Morphospace: EA and MC of all analysed leaves");
     let (points, missing, current, mut highlight) = {
         let g = state.lock().unwrap();
-        let mut pts = Vec::new();
-        let mut missing = 0;
-        for (i, img) in g.images.iter().enumerate() {
-            for (j, r) in g.analysis_results.get(&img.path).into_iter().flatten().enumerate() {
-                let m = &r.measurement;
-                if m.ea.is_nan() || m.mc.is_nan() {
-                    missing += 1;
-                    continue;
-                }
-                let many = g.analysis_results[&img.path].len() > 1;
-                pts.push(MorphPoint {
-                    image: i,
-                    leaf: j,
-                    ea: m.ea,
-                    mc: m.mc,
-                    group: group_of(&img.label).to_string(),
-                    label: if many { format!("{}, leaf {}", img.label, r.leaf) } else { img.label.clone() },
-                    flagged: !r.concerns().is_empty(),
-                });
-            }
-        }
+        let all = g.morph_entries();
+        let n = all.len();
+        let pts: Vec<MorphEntry> = all.into_iter().filter(|q| q.point.ea.is_finite() && q.point.mc.is_finite()).collect();
+        let missing = n - pts.len();
         (pts, missing, g.current_image_index.map(|i| (i, g.current_leaf)), g.highlight.clone())
     };
     if points.is_empty() {
         ui.label("No analysed leaves with both EA and MC yet. Analyse some images first.");
         return;
     }
-    let mut groups: Vec<String> = points.iter().map(|p| p.group.clone()).collect();
+    let mut groups: Vec<String> = points.iter().map(|p| p.point.group.clone()).collect();
     groups.sort();
     groups.dedup();
-    let name = |g: &str| if g.is_empty() { "(workspace folder)".to_string() } else { g.to_string() };
+    let name = |g: &str| group_name(g).to_string();
     ui.horizontal_wrapped(|ui| {
         if groups.len() <= 3 {
             for (g, c) in groups.iter().zip(GROUP_COLORS) {
@@ -616,16 +576,8 @@ pub fn render_morphospace(ui: &mut egui::Ui, state: &Arc<Mutex<AppState>>) {
         ui.label("Hollow: flag other than ok or a mask warning. Ring: leaf on screen. Click a point to open the leaf.");
     });
     state.lock().unwrap().highlight = highlight.clone();
-    // colour follows the subfolder: by name order if there are at most three, else one highlighted subfolder
-    let colour = |g: &str| -> egui::Color32 {
-        if groups.len() <= 3 {
-            groups.iter().position(|x| x == g).map_or(OTHER_COLOR, |i| GROUP_COLORS[i])
-        } else if highlight.as_deref() == Some(g) {
-            GROUP_COLORS[0]
-        } else {
-            OTHER_COLOR
-        }
-    };
+    // colour follows the subfolder: by name order if there are at most three, else one highlighted subfolder (D119)
+    let colour = |g: &str| group_slot(&groups, highlight.as_deref(), g).map_or(OTHER_COLOR, |i| GROUP_COLORS[i]);
     if missing > 0 {
         ui.label(format!("{missing} leaves not shown (EA or MC not resolved)."));
     }
@@ -637,19 +589,19 @@ pub fn render_morphospace(ui: &mut egui::Ui, state: &Arc<Mutex<AppState>>) {
         .show_y(false)
         .show(ui, |p| {
             // grey first, coloured on top; flagged leaves hollow
-            let mut order: Vec<&MorphPoint> = points.iter().collect();
-            order.sort_by_key(|q| colour(&q.group) != OTHER_COLOR);
+            let mut order: Vec<&MorphEntry> = points.iter().collect();
+            order.sort_by_key(|q| colour(&q.point.group) != OTHER_COLOR);
             for q in order {
                 p.points(
-                    Points::new(vec![[q.ea, q.mc]])
-                        .color(colour(&q.group))
+                    Points::new(vec![[q.point.ea, q.point.mc]])
+                        .color(colour(&q.point.group))
                         .radius(4.0)
-                        .filled(!q.flagged)
+                        .filled(!q.point.flagged)
                         .allow_hover(false),
                 );
             }
             if let Some(q) = points.iter().find(|q| Some((q.image, q.leaf)) == current) {
-                p.points(Points::new(vec![[q.ea, q.mc]]).color(egui::Color32::WHITE).radius(8.0).filled(false));
+                p.points(Points::new(vec![[q.point.ea, q.point.mc]]).color(egui::Color32::WHITE).radius(8.0).filled(false));
             }
         });
     // nearest point under the pointer: tooltip and click
@@ -657,13 +609,16 @@ pub fn render_morphospace(ui: &mut egui::Ui, state: &Arc<Mutex<AppState>>) {
     let near = r.hover_pos().and_then(|pos| {
         points
             .iter()
-            .map(|q| (q, response.transform.position_from_point(&egui_plot::PlotPoint::new(q.ea, q.mc)).distance(pos)))
+            .map(|q| {
+                let at = egui_plot::PlotPoint::new(q.point.ea, q.point.mc);
+                (q, response.transform.position_from_point(&at).distance(pos))
+            })
             .filter(|(_, d)| *d < 10.0)
             .min_by(|a, b| a.1.total_cmp(&b.1))
             .map(|(q, _)| q)
     });
     if let Some(q) = near {
-        r.clone().on_hover_text_at_pointer(format!("{}\nEA {:.4}, MC {:.2}", q.label, q.ea, q.mc));
+        r.clone().on_hover_text_at_pointer(format!("{}\nEA {:.4}, MC {:.2}", q.label, q.point.ea, q.point.mc));
         if r.clicked() {
             let mut g = state.lock().unwrap();
             g.open_leaf(q.image, q.leaf);
