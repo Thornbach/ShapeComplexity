@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-use crate::batch::measure_file;
+use crate::batch::{grey_share_of, measure_file_leaves, Leaf, MaskCheck};
 use crate::v2::{measure_traced, Grid, MaskSource, Measurement, Trace, PAD_CONTOUR};
 
 /// A straight (non-premultiplied) RGBA buffer.
@@ -16,17 +16,25 @@ pub struct MorphOverlay {
     pub rgba: Vec<u8>, // width * height * 4
 }
 
-/// Colours of the mask picture (RGBA).
-pub const LEAF_RGBA: [u8; 4] = [70, 70, 70, 255];
+/// Colours of the mask picture (RGBA), as in Fig. 1 of the paper; drawn on white.
+pub const LEAF_RGBA: [u8; 4] = [154, 152, 144, 255];
 /// Pixels of the normalised mask that are not in L' (the petiole, if one was found).
-pub const REMOVED_RGBA: [u8; 4] = [230, 120, 0, 255];
+pub const REMOVED_RGBA: [u8; 4] = [11, 11, 11, 255];
 /// Pixels of L' that are not in the normalised mask (filled holes).
-pub const FILLED_RGBA: [u8; 4] = [170, 170, 170, 255];
+pub const FILLED_RGBA: [u8; 4] = [205, 203, 195, 255];
 
-/// Full analysis output for one image.
+/// Full analysis output for one leaf of an image.
 pub struct MorphResult {
+    /// 1, 2, ... (see `batch::Leaf`); 1 for the largest-region run.
+    pub leaf: usize,
+    /// Mean pixel centre (x, y) of the leaf region in input pixels; NaN for the largest-region run.
+    pub centroid: [f64; 2],
+    /// Pixels of the measured region.
+    pub px: usize,
     pub measurement: Measurement,
     pub trace: Trace,
+    /// Mask check (dropped area, non-binary `dark` input); warnings only.
+    pub check: MaskCheck,
     /// Normalised mask: leaf, removed petiole and filled holes on a transparent background.
     pub mask_image: MorphOverlay,
     /// Outline and blade line as (x, y) in pixel units of `mask_image` (0 = left/top edge of the picture).
@@ -34,10 +42,15 @@ pub struct MorphResult {
     pub blade_line_xy: Vec<[f32; 2]>,
 }
 
-/// Run the analysis on one image file.
+/// Run the analysis on one image file (largest region).
 pub fn analyze(image_path: &Path, source: MaskSource) -> Result<MorphResult, String> {
-    let (measurement, trace) = measure_file(image_path, source)?;
-    Ok(build(measurement, trace))
+    Ok(analyze_leaves(image_path, source, false)?.remove(0))
+}
+
+/// Run the analysis on the leaves of one image file: the largest region, or every leaf region (`all_leaves`, D116).
+pub fn analyze_leaves(image_path: &Path, source: MaskSource, all_leaves: bool) -> Result<Vec<MorphResult>, String> {
+    let (leaves, check) = measure_file_leaves(image_path, source, all_leaves)?;
+    Ok(leaves.into_iter().map(|leaf| build(leaf, check.clone())).collect())
 }
 
 /// Same as [`analyze`] but from an RGBA buffer already in memory (`width * height * 4` bytes).
@@ -46,21 +59,26 @@ pub fn analyze_rgba(rgba: &[u8], width: u32, height: u32, source: MaskSource) ->
     if rgba.len() != w * h * 4 {
         return Err("analyze_rgba: buffer is not width*height*4 bytes".into());
     }
+    let grey = |p: &[u8]| image::Pixel::to_luma(&image::Rgb([p[0], p[1], p[2]])).0[0];
     let data = rgba
         .chunks_exact(4)
         .map(|p| match source {
             MaskSource::Alpha => p[3] > 127,
-            MaskSource::Dark => {
-                let luma = image::Rgb([p[0], p[1], p[2]]);
-                image::Pixel::to_luma(&luma).0[0] < 128 && p[3] > 127
-            }
+            MaskSource::Dark => grey(p) < 128 && p[3] > 127,
         })
         .collect();
     let (measurement, trace) = measure_traced(&Grid::from_vec(h, w, data)).ok_or("no leaf pixels")?;
-    Ok(build(measurement, trace))
+    let check = MaskCheck {
+        dropped_share: trace.placement.as_ref().map_or(0.0, |p| p.dropped_share()),
+        grey_share: (source == MaskSource::Dark)
+            .then(|| grey_share_of(rgba.chunks_exact(4).filter(|p| p[3] > 127).map(grey))),
+    };
+    let px = trace.placement.as_ref().map_or(0, |p| p.kept_px);
+    Ok(build(Leaf { index: 1, centroid: [f64::NAN; 2], px, measurement, trace }, check))
 }
 
-fn build(measurement: Measurement, trace: Trace) -> MorphResult {
+fn build(leaf: Leaf, check: MaskCheck) -> MorphResult {
+    let Leaf { index, centroid, px, measurement, trace } = leaf;
     let (norm, lp) = (&trace.norm, &trace.lp);
     let mut rgba = Vec::with_capacity(norm.data.len() * 4);
     for (n, l) in norm.data.iter().zip(&lp.data) {
@@ -77,5 +95,5 @@ fn build(measurement: Measurement, trace: Trace) -> MorphResult {
     let to_xy = |pts: &[[f64; 2]]| pts.iter().map(|p| [(p[1] + off) as f32, (p[0] + off) as f32]).collect();
     let outline_xy = to_xy(&trace.outline);
     let blade_line_xy = to_xy(&trace.blade_line);
-    MorphResult { measurement, trace, mask_image, outline_xy, blade_line_xy }
+    MorphResult { leaf: index, centroid, px, measurement, trace, check, mask_image, outline_xy, blade_line_xy }
 }

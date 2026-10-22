@@ -32,9 +32,38 @@ v2.0.0 replaces the v1 method. The numbers of v1.0.0 cannot be reproduced with t
 - GUI on the same pipeline (`gui_api::analyze` → `v2::measure_traced`): normalised mask with removed petiole,
   outline and blade line; values and flags; plots of h(s) (click to show the point on the leaf) and ln(e(k)/τ);
   export of one CSV with the CLI columns.
+- GUI panels after Fig. 1 of the paper and a mask check (D114 A, B; no value changes; fixture tests still bit
+  identical):
+  - Library: the trace also holds the whitened blade line (`white`) and a `Placement` (crop box, scaled size,
+    scale factor, leaf pixels kept and dropped) from `v2::normalise_placed`; `Placement::to_input` maps the
+    normalised mask onto the input image. `v2::metrics::efd_reconstruct(w, k)`: the k-harmonic elliptic Fourier
+    fit with the coefficients and summation order of `error_curve`. `v2::mask_from_image`, `alpha_mask`,
+    `dark_mask` work on a decoded image, so a file is read once.
+  - Mask check (`batch::MaskCheck`, D115): warns when > 1 % of the leaf pixels lie outside the largest region, and,
+    for `dark` input, when > 50 % of the non-white pixels (grey value ≤ 223) are grey (32–223).
+    `batch::measure_file` returns it with the values; the CLI prints the warnings on standard error.
+  - GUI: input image with the normalised mask placed over it; margin band inside/outside the blade line; h(s) filled
+    by sign, with the stretch on screen shaded; whitened blade line with a k slider and the live Fourier fit;
+    ln(e(k)/τ) with the MC area shaded and k marked; dropped area, grey share and warnings in the results; ⚠ in the
+    image strip for leaves with a flag other than `ok` or a warning. Mask colours as in Fig. 1 (drawn on white).
+  - `leaf_complex_gui/examples/screenshot.rs`: renders the GUI on one leaf and saves a screenshot (development check).
+- Several leaves per image and leaf area (D114 E, D116): `--all-leaves` measures every 4-connected region with
+  √A ≥ 250 px as a leaf (raster order; the largest region if none reaches 250 px), each exactly as the default run
+  measures the largest region; columns `leaf`, `leaf_x`, `leaf_y` after `file`. `--px-per-mm` adds `area_mm2`
+  (pixels of the measured region / scale²) after `sqrtA_native`. Without the options the columns are unchanged.
+  Library: `v2::leaf_regions`, `batch::measure_file_leaves`, `batch::Leaf`, `batch::Columns`,
+  `gui_api::analyze_leaves`. GUI: *All leaves* checkbox, *px/mm* field, leaf buttons, leaf numbers in the input view,
+  leaf area in the results; the export uses the same columns.
+- GUI morphospace (D114 C): EA–MC scatter of all analysed leaves in a *Morphospace* tab. Colour by subfolder (up to
+  three, fixed by name order; with more, one highlighted subfolder, the rest grey); hollow points for leaves with a
+  flag other than `ok` or a mask warning; the leaf on screen ringed; hover shows the file, a click opens the leaf.
 - `tests/synthetic.rs`: synthetic shapes (circle EA ≈ 0, MC = 0, elongation 1, no petiole; ellipses MC = 0 and
   elongation = aspect ratio within 2 %; teeth raise EA; lobes raise MC; flags at √A = 200, 300, 600 px), the `alpha`
-  and `dark` inputs give identical values, the results row.
+  and `dark` inputs give identical values, the results row; `efd_reconstruct` gives e(1) of the error curve (relative
+  difference < 10⁻⁹); the placement maps the outline back onto the input (every point < 1 px from a leaf edge) and
+  counts dropped pixels exactly; the mask-check thresholds; several leaves (two leaves kept and a small one
+  dropped, the largest gives the default values bit for bit, centroid and crop in the image frame; fallback to the
+  largest small region) and the optional columns.
 - `tests/v2_steps.rs` and `tests/fixtures/`: every step against fixtures of the reference (bit for bit), and the
   whole pipeline on 221 masks (201 synthetic shapes, 20 own oak leaves). The fixtures are excluded from the
   published crate; the tests skip without them.

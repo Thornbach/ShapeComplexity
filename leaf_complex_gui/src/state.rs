@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use eframe::egui;
-use shapecomplexity::batch::image_files;
+use shapecomplexity::batch::{image_files, MaskCheck};
+use shapecomplexity::v2::{Flag, Placement};
 use shapecomplexity::{MaskSource, Measurement};
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -43,9 +44,15 @@ impl PackedMask {
     }
 }
 
-/// What the GUI keeps of one analysis.
+/// What the GUI keeps of one analysed leaf.
 #[derive(Clone)]
 pub struct AnalysisResult {
+    /// 1, 2, ... (D116); 1 for the largest-region run.
+    pub leaf: usize,
+    /// Mean pixel centre (x, y) of the leaf region in input pixels; NaN for the largest-region run.
+    pub centroid: [f64; 2],
+    /// Pixels of the measured region (for the area).
+    pub px: usize,
     pub measurement: Measurement,
     pub mask: PackedMask,
     /// Outline and blade line as (x, y) in pixel units of the mask picture.
@@ -55,6 +62,48 @@ pub struct AnalysisResult {
     pub margin_profile: Vec<f64>,
     /// e(k) / sqrt(A), k = 1, 2, ...; empty if MC was not computed.
     pub error_curve: Vec<f64>,
+    /// Whitened blade line (row, col), px at sqrt(A) = 1000; the outline the Fourier fits approximate.
+    pub white: Vec<[f64; 2]>,
+    /// Where the normalised mask lies in the input image.
+    pub placement: Option<Placement>,
+    /// Mask check (D115): dropped area, non-binary `dark` input.
+    pub check: MaskCheck,
+}
+
+impl AnalysisResult {
+    /// Reasons to look at this leaf again: resolution flags other than ok, and mask-check warnings.
+    pub fn concerns(&self) -> Vec<String> {
+        let m = &self.measurement;
+        let mut v = Vec::new();
+        for (name, flag) in [("EA", m.ea_flag), ("MC", m.mc_flag)] {
+            if flag != Flag::Ok {
+                v.push(format!("{name} flag: {} (√A native {:.0} px)", flag.as_str(), m.sqrt_a_native));
+            }
+        }
+        v.extend(self.check.warnings());
+        v
+    }
+}
+
+/// Input image on screen (at most 2048 px a side) and its full size (width, height); Err if it could not be read.
+pub type InputTexture = Result<(egui::TextureHandle, [f32; 2]), String>;
+
+/// What the right-hand panel shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CentralView {
+    /// Values and Fig. 1 panels of the leaf on screen.
+    Leaf,
+    /// EA-MC scatter of all analysed leaves.
+    Morphospace,
+}
+
+/// What the image view shows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ViewMode {
+    /// The normalised mask (sqrt(A) = 1000 px), as measured.
+    Mask,
+    /// The input image with the normalised mask placed over it.
+    Input,
 }
 
 pub struct ImageInfo {
@@ -75,22 +124,44 @@ pub struct AppState {
     /// Which pixels are leaf. None until the user chooses: there is no default.
     pub mask_source: Option<MaskSource>,
 
-    // Analysis
-    pub analysis_results: HashMap<PathBuf, AnalysisResult>,
+    /// Measure every leaf region of an image (D116) instead of the largest region. Results are cleared when it changes.
+    pub all_leaves: bool,
+    /// Image scale for the leaf area (export column `area_mm2`); None = not given.
+    pub px_per_mm: Option<f64>,
+    pub px_per_mm_text: String,
+
+    // Analysis: the leaves of each image (one unless `all_leaves`)
+    pub analysis_results: HashMap<PathBuf, Vec<AnalysisResult>>,
+    /// Leaf on screen (index into the image's results).
+    pub current_leaf: usize,
     pub errors: HashMap<PathBuf, String>,
     pub analysis_in_progress: bool,
     pub batch_processing: bool,
     pub current_batch_index: usize,
     pub total_batch_count: usize,
 
-    /// Texture of the mask on screen, with the image it belongs to.
-    pub mask_texture: Option<(PathBuf, egui::TextureHandle)>,
+    /// Texture of the mask on screen, with its image, leaf and whether it shows the margin band.
+    pub mask_texture: Option<(PathBuf, usize, bool, egui::TextureHandle)>,
+    /// Texture of the input image on screen, with the image it belongs to.
+    pub input_texture: Option<(PathBuf, InputTexture)>,
+    /// Elliptic Fourier fit on screen: image, leaf, number of harmonics, points (row, col).
+    pub efd_fit: Option<(PathBuf, usize, usize, Vec<[f64; 2]>)>,
 
     // UI State
     /// Index of the outline point picked in the h(s) plot.
     pub selected_point: Option<usize>,
+    pub view_mode: ViewMode,
     pub show_outline: bool,
     pub show_blade_line: bool,
+    /// Colour the margin between the outline and the blade line (Fig. 1 b).
+    pub show_band: bool,
+    /// Runs of outline points (first, last index) inside the image view; empty if the whole outline is visible.
+    pub visible_runs: Vec<(usize, usize)>,
+    /// Harmonics of the Fourier fit shown (Fig. 1 d, e).
+    pub efd_k: usize,
+    pub central_view: CentralView,
+    /// Subfolder coloured in the morphospace when there are more than three.
+    pub highlight: Option<String>,
     pub zoom_level: f32,
     pub pan_offset: egui::Vec2,
 
@@ -105,16 +176,28 @@ impl Default for AppState {
             images: Vec::new(),
             current_image_index: None,
             mask_source: None,
+            all_leaves: false,
+            px_per_mm: None,
+            px_per_mm_text: String::new(),
             analysis_results: HashMap::new(),
+            current_leaf: 0,
             errors: HashMap::new(),
             analysis_in_progress: false,
             batch_processing: false,
             current_batch_index: 0,
             total_batch_count: 0,
             mask_texture: None,
+            input_texture: None,
+            efd_fit: None,
             selected_point: None,
+            view_mode: ViewMode::Mask,
             show_outline: true,
             show_blade_line: true,
+            show_band: false,
+            visible_runs: Vec::new(),
+            efd_k: 3,
+            central_view: CentralView::Leaf,
+            highlight: None,
             zoom_level: 1.0,
             pan_offset: egui::Vec2::ZERO,
             last_error: None,
@@ -128,8 +211,13 @@ impl AppState {
         self.current_image_index.and_then(|idx| self.images.get(idx))
     }
 
+    /// Leaves of the image on screen.
+    pub fn current_leaves(&self) -> &[AnalysisResult] {
+        self.current_image().and_then(|img| self.analysis_results.get(&img.path)).map_or(&[], |v| v.as_slice())
+    }
+
     pub fn current_result(&self) -> Option<&AnalysisResult> {
-        self.current_image().and_then(|img| self.analysis_results.get(&img.path))
+        self.current_leaves().get(self.current_leaf)
     }
 
     pub fn load_workspace(&mut self, dir: PathBuf) -> Result<(), String> {
@@ -162,17 +250,42 @@ impl AppState {
         }
     }
 
+    /// Results depend on which regions are leaves, so a change drops them.
+    pub fn set_all_leaves(&mut self, all: bool) {
+        if self.all_leaves != all {
+            self.all_leaves = all;
+            self.clear_results();
+        }
+    }
+
+    /// Show leaf `leaf` of image `index`.
+    pub fn open_leaf(&mut self, index: usize, leaf: usize) {
+        self.select_image(index);
+        self.select_leaf(leaf);
+    }
+
+    pub fn select_leaf(&mut self, i: usize) {
+        if i != self.current_leaf && i < self.current_leaves().len() {
+            self.current_leaf = i;
+            self.selected_point = None;
+            self.visible_runs.clear();
+        }
+    }
+
     fn clear_results(&mut self) {
         self.analysis_results.clear();
         self.errors.clear();
         self.mask_texture = None;
+        self.efd_fit = None;
         self.selected_point = None;
+        self.current_leaf = 0;
+        self.visible_runs.clear();
         for img in &mut self.images {
             img.status = AnalysisStatus::NotStarted;
         }
     }
 
-    pub fn set_result(&mut self, path: &Path, result: Result<AnalysisResult, String>) {
+    pub fn set_result(&mut self, path: &Path, result: Result<Vec<AnalysisResult>, String>) {
         let status = match result {
             Ok(r) => {
                 self.errors.remove(path);
@@ -188,15 +301,23 @@ impl AppState {
         if let Some(img) = self.images.iter_mut().find(|i| i.path == path) {
             img.status = status;
         }
-        if self.mask_texture.as_ref().is_some_and(|(p, _)| p == path) {
+        if self.mask_texture.as_ref().is_some_and(|(p, ..)| p == path) {
             self.mask_texture = None;
+        }
+        if self.efd_fit.as_ref().is_some_and(|(p, ..)| p == path) {
+            self.efd_fit = None;
+        }
+        if self.current_image().is_some_and(|i| i.path == path) {
+            self.current_leaf = 0;
         }
     }
 
     pub fn select_image(&mut self, index: usize) {
         if index < self.images.len() {
             self.current_image_index = Some(index);
+            self.current_leaf = 0;
             self.selected_point = None;
+            self.visible_runs.clear();
             self.reset_view();
         }
     }

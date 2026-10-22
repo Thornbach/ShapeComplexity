@@ -147,6 +147,22 @@ fn efd(c: &[Point], n_harm: usize) -> Efd {
     Efd { xy, t, period, dc, co }
 }
 
+/// Elliptic Fourier reconstruction of a closed outline with `k` harmonics, at the outline's own vertices (zero-length
+/// steps dropped), as (row, col). The same coefficients and summation order as `error_curve`; for display.
+pub fn efd_reconstruct(w: &[Point], k: usize) -> Vec<Point> {
+    let f = efd(w, k);
+    let phi: Vec<f64> = f.t.iter().map(|ti| 2.0 * PI * ti / f.period).collect();
+    let mut rec: Vec<[f64; 2]> = vec![f.dc; f.t.len()];
+    for (n, co) in f.co.iter().enumerate() {
+        for (i, p) in phi.iter().enumerate() {
+            let a = (n + 1) as f64 * p;
+            let (cs, sn) = (a.cos(), a.sin());
+            rec[i] = [rec[i][0] + (co[0] * cs + co[1] * sn), rec[i][1] + (co[2] * cs + co[3] * sn)];
+        }
+    }
+    rec.iter().map(|q| [q[1], q[0]]).collect()
+}
+
 /// Exact nearest-neighbour distances on a uniform grid of cells.
 struct NearestGrid {
     pts: Vec<[f64; 2]>,

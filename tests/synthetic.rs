@@ -8,9 +8,10 @@
 use std::f64::consts::PI;
 use std::path::PathBuf;
 
-use shapecomplexity::batch::{csv_row, measure_file, CSV_HEADER};
+use shapecomplexity::batch::{csv_row, grey_share_of, measure_file, measure_file_leaves, Columns, MaskCheck, CSV_HEADER};
 use shapecomplexity::v2::fill::polygon_fill;
-use shapecomplexity::v2::{flags, measure, Flag, Grid, Mask, MaskSource, Measurement};
+use shapecomplexity::v2::metrics::efd_reconstruct;
+use shapecomplexity::v2::{flags, measure, measure_traced, Flag, Grid, Mask, MaskSource, Measurement, PAD_CONTOUR, SQRT_A};
 
 const NPTS: usize = 8000;
 const MARGIN: f64 = 0.10;
@@ -157,10 +158,10 @@ fn alpha_and_dark_inputs_give_the_same_result() {
     let (pa, pd) = (temp_png("alpha"), temp_png("dark"));
     rgba.save(&pa).unwrap();
     grey.save(&pd).unwrap();
-    let (a, _) = measure_file(&pa, MaskSource::Alpha).unwrap();
-    let (d, _) = measure_file(&pd, MaskSource::Dark).unwrap();
+    let (a, _, _) = measure_file(&pa, MaskSource::Alpha).unwrap();
+    let (d, _, _) = measure_file(&pd, MaskSource::Dark).unwrap();
     // the dark rule also works on the cut-out (transparent pixels never count as leaf)
-    let (d2, _) = measure_file(&pa, MaskSource::Dark).unwrap();
+    let (d2, _, _) = measure_file(&pa, MaskSource::Dark).unwrap();
     // an image without alpha is refused in alpha mode
     let refused = measure_file(&pd, MaskSource::Alpha);
     let _ = std::fs::remove_file(&pa);
@@ -182,4 +183,190 @@ fn results_row() {
     assert_eq!(header, ["file", "EA", "MC", "elongation", "petiole_len", "sqrtA_native", "EA_flag", "MC_flag", "version"]);
     assert!(row.starts_with("\"a,b/leaf.png\",NA,NA,"), "{row}");
     assert!(row.ends_with(&format!(",not_resolved,not_resolved,{}", env!("CARGO_PKG_VERSION"))), "{row}");
+}
+
+// --- display and mask-check helpers (D114, D115): they must not change any value ------------------------------------
+
+#[test]
+fn efd_reconstruction_gives_the_first_error() {
+    let (_, t) = measure_traced(&render(&polar(5.0, 0.2, 0.0, 0.0), 600.0)).unwrap();
+    let w = &t.white;
+    let rec = efd_reconstruct(w, 1);
+    assert_eq!(rec.len(), w.len());
+    // e(1) by brute force: L4 mean of the two nearest-distance sets
+    let near = |a: &[[f64; 2]], b: &[[f64; 2]]| -> Vec<f64> {
+        a.iter().map(|p| b.iter().map(|q| (p[0] - q[0]).hypot(p[1] - q[1])).fold(f64::INFINITY, f64::min)).collect()
+    };
+    let m4 = |d: &[f64]| d.iter().map(|v| v.powi(4)).sum::<f64>() / d.len() as f64;
+    let e1 = (0.5 * (m4(&near(&rec, w)) + m4(&near(w, &rec)))).powf(0.25) / SQRT_A;
+    println!("e(1): curve {} brute force {e1}", t.error_curve[0]);
+    assert!((e1 / t.error_curve[0] - 1.0).abs() < 1e-9);
+    // many harmonics come close to the line
+    let far = near(&efd_reconstruct(w, 64), w).into_iter().fold(0.0, f64::max);
+    assert!(far < 2.0, "max distance at k = 64: {far} px");
+}
+
+#[test]
+fn placement_maps_the_outline_onto_the_input_and_counts_dropped_pixels() {
+    let leaf = render(&polar(5.0, 0.2, 0.0, 0.0), 300.0);
+    // leaf at (37, 53) in a larger image, plus a 10 x 10 speck that the method drops
+    let (r0, c0) = (37, 53);
+    let mut raw = Mask::new(leaf.rows + 80, leaf.cols + 120);
+    for r in 0..leaf.rows {
+        for c in 0..leaf.cols {
+            raw.set(r + r0, c + c0, leaf.get(r, c));
+        }
+    }
+    for r in 2..12 {
+        for c in 2..12 {
+            raw.set(r, c, true);
+        }
+    }
+    let (m, t) = measure_traced(&raw).unwrap();
+    let p = t.placement.as_ref().unwrap();
+    let leaf_px = leaf.data.iter().filter(|v| **v).count();
+    assert_eq!(p.input_size, [raw.rows, raw.cols]);
+    assert_eq!((p.leaf_px, p.kept_px), (leaf_px + 100, leaf_px));
+    assert!((p.dropped_share() - 100.0 / (leaf_px + 100) as f64).abs() < 1e-15);
+    assert_eq!(m.sqrt_a_native, (leaf_px as f64).sqrt());
+    // outline in the picture frame of the normalised mask -> input; every point near a leaf/background edge
+    let edge = |y: f64, x: f64| -> f64 {
+        let mut best = f64::INFINITY;
+        for r in (y as usize).saturating_sub(4)..(y as usize + 5).min(raw.rows - 1) {
+            for c in (x as usize).saturating_sub(4)..(x as usize + 5).min(raw.cols - 1) {
+                if raw.get(r, c) != raw.get(r, c + 1) {
+                    best = best.min((x - (c + 1) as f64).abs().hypot(y - (r as f64 + 0.5)));
+                }
+                if raw.get(r, c) != raw.get(r + 1, c) {
+                    best = best.min((x - (c as f64 + 0.5)).hypot(y - (r + 1) as f64));
+                }
+            }
+        }
+        best
+    };
+    let off = 0.5 - PAD_CONTOUR as f64;
+    let worst = t
+        .outline
+        .iter()
+        .map(|q| {
+            let (x, y) = p.to_input(q[1] + off, q[0] + off);
+            edge(y, x)
+        })
+        .fold(0.0, f64::max);
+    println!("crop {:?}, worst outline-to-edge distance {worst} input px", p.crop);
+    assert!(worst < 1.0, "{worst}");
+}
+
+#[test]
+fn mask_check_warnings() {
+    assert_eq!(grey_share_of([0u8, 0, 255, 255].into_iter()), 0.0);
+    assert_eq!(grey_share_of([255u8; 5].into_iter()), 0.0);
+    assert_eq!(grey_share_of([0u8, 31, 32, 223, 224].into_iter()), 0.5);
+    let check = |dropped, grey| MaskCheck { dropped_share: dropped, grey_share: grey }.warnings().len();
+    assert_eq!(check(0.01, Some(0.5)), 0);
+    assert_eq!(check(0.0101, None), 1);
+    assert_eq!(check(0.0, Some(0.51)), 1);
+    assert_eq!(check(0.2, Some(0.9)), 2);
+}
+
+// --- several leaves per image, leaf area, optional columns (D116) ------------------------------------------------
+
+/// Copy `m` into `canvas` at (r0, c0).
+fn place(canvas: &mut Mask, m: &Mask, r0: usize, c0: usize) {
+    for r in 0..m.rows {
+        for c in 0..m.cols {
+            if m.get(r, c) {
+                canvas.set(r + r0, c + c0, true);
+            }
+        }
+    }
+}
+
+fn save_dark(m: &Mask, name: &str) -> PathBuf {
+    let p = temp_png(name);
+    image::GrayImage::from_fn(m.cols as u32, m.rows as u32, |x, y| {
+        image::Luma([if m.get(y as usize, x as usize) { 0 } else { 255 }])
+    })
+    .save(&p)
+    .unwrap();
+    p
+}
+
+#[test]
+fn all_leaves_measures_each_region_alone() {
+    let big = render(&polar(5.0, 0.2, 0.0, 0.0), 400.0);
+    let mid = render(&ellipse(2.0), 300.0);
+    let small = render(&polar(0.0, 0.0, 0.0, 0.0), 100.0);
+    // raster order of first pixels: mid (top right), then big, then small
+    let mut img = Mask::new(big.rows + mid.rows + 40, big.cols + mid.cols + small.cols + 60);
+    place(&mut img, &mid, 5, big.cols + 20);
+    place(&mut img, &big, mid.rows + 20, 10);
+    place(&mut img, &small, mid.rows + 30, big.cols + mid.cols + 40);
+    let path = save_dark(&img, "leaves");
+    let (one, _, check1) = measure_file(&path, MaskSource::Dark).unwrap();
+    let (leaves, check) = measure_file_leaves(&path, MaskSource::Dark, true).unwrap();
+    let _ = std::fs::remove_file(&path);
+    let count = |m: &Mask| m.data.iter().filter(|v| **v).count();
+    let (nb, nm, ns) = (count(&big), count(&mid), count(&small));
+    assert_eq!(leaves.len(), 2);
+    assert_eq!(leaves.iter().map(|l| (l.index, l.px)).collect::<Vec<_>>(), [(1, nm), (2, nb)]);
+    // the largest region gives the default row bit for bit
+    let b = &leaves[1].measurement;
+    for (x, y) in [(b.ea, one.ea), (b.mc, one.mc), (b.elongation, one.elongation), (b.sqrt_a_native, one.sqrt_a_native)] {
+        assert_eq!(x.to_bits(), y.to_bits());
+    }
+    assert!((leaves[0].measurement.elongation - 2.0).abs() < 0.05);
+    // dropped share: the default drops mid and small, all leaves only small
+    let total = (nb + nm + ns) as f64;
+    assert!((check1.dropped_share - (nm + ns) as f64 / total).abs() < 1e-15);
+    assert!((check.dropped_share - ns as f64 / total).abs() < 1e-15);
+    // centroid and placement in the frame of the whole image
+    let cy = (0..mid.rows).flat_map(|r| (0..mid.cols).map(move |c| (r, c))).filter(|&(r, c)| mid.get(r, c));
+    let (sr, sc) = cy.fold((0.0, 0.0), |a, (r, c)| (a.0 + r as f64, a.1 + c as f64));
+    let want = [sc / nm as f64 + (big.cols + 20) as f64 + 0.5, sr / nm as f64 + 5.0 + 0.5];
+    assert!((leaves[0].centroid[0] - want[0]).abs() < 1e-9 && (leaves[0].centroid[1] - want[1]).abs() < 1e-9);
+    let p = leaves[0].trace.placement.as_ref().unwrap();
+    assert_eq!(p.input_size, [img.rows, img.cols]);
+    // crop box = bounding box of `mid` in the image
+    let first_row = (0..mid.rows).find(|&r| (0..mid.cols).any(|c| mid.get(r, c))).unwrap();
+    let first_col = (0..mid.cols).find(|&c| (0..mid.rows).any(|r| mid.get(r, c))).unwrap();
+    assert_eq!(p.crop[..2], [5 + first_row, big.cols + 20 + first_col]);
+}
+
+#[test]
+fn all_leaves_falls_back_to_the_largest_small_region() {
+    let a = render(&polar(0.0, 0.0, 0.0, 0.0), 150.0);
+    let b = render(&polar(0.0, 0.0, 0.0, 0.0), 200.0);
+    let mut img = Mask::new(a.rows.max(b.rows) + 20, a.cols + b.cols + 30);
+    place(&mut img, &a, 10, 10);
+    place(&mut img, &b, 10, a.cols + 20);
+    let path = save_dark(&img, "small");
+    let (leaves, _) = measure_file_leaves(&path, MaskSource::Dark, true).unwrap();
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(leaves.len(), 1);
+    assert_eq!(leaves[0].px, b.data.iter().filter(|v| **v).count());
+    assert_eq!(leaves[0].measurement.ea_flag, Flag::NotResolved);
+}
+
+#[test]
+fn optional_columns() {
+    assert_eq!(Columns::default().header(), CSV_HEADER);
+    let cols = Columns { leaves: true, px_per_mm: Some(20.0) };
+    assert_eq!(
+        cols.header(),
+        "file,leaf,leaf_x,leaf_y,EA,MC,elongation,petiole_len,sqrtA_native,area_mm2,EA_flag,MC_flag,version"
+    );
+    let img = render(&polar(5.0, 0.2, 0.0, 0.0), 300.0);
+    let path = save_dark(&img, "cols");
+    let (leaves, _) = measure_file_leaves(&path, MaskSource::Dark, true).unwrap();
+    let (default, _) = measure_file_leaves(&path, MaskSource::Dark, false).unwrap();
+    let _ = std::fs::remove_file(&path);
+    let row = cols.row("leaf.png", &leaves[0]);
+    let f: Vec<&str> = row.split(',').collect();
+    assert_eq!(f.len(), 13);
+    assert_eq!(f[1], "1");
+    assert_eq!(f[9].parse::<f64>().unwrap(), leaves[0].px as f64 / 400.0);
+    assert_eq!(Columns::default().row("leaf.png", &default[0]), csv_row("leaf.png", &default[0].measurement));
+    // the same leaf, with and without the option: identical values
+    assert_eq!(f[4..9].join(","), csv_row("x", &default[0].measurement).split(',').skip(1).take(5).collect::<Vec<_>>().join(","));
 }

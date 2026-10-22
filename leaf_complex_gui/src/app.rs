@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use shapecomplexity::batch::{csv_row, CSV_HEADER};
+use shapecomplexity::batch::Columns;
 
 use crate::analysis::AnalysisEngine;
 use crate::state::{AnalysisStatus, AppState};
@@ -18,7 +18,12 @@ pub struct LeafComplexApp {
 
 impl LeafComplexApp {
     pub fn new(_cc: &eframe::CreationContext<'_>) -> Self {
-        Self { state: Arc::new(Mutex::new(AppState::default())), show_about: false }
+        Self::with_state(Arc::new(Mutex::new(AppState::default())))
+    }
+
+    /// The app on a prepared state (for tools that drive the GUI without clicks, e.g. `examples/screenshot.rs`).
+    pub fn with_state(state: Arc<Mutex<AppState>>) -> Self {
+        Self { state, show_about: false }
     }
 
     fn open_workspace(&mut self, ctx: &egui::Context) {
@@ -122,20 +127,21 @@ impl LeafComplexApp {
         let state = Arc::clone(&self.state);
         let ctx = ctx.clone();
 
-        let (image_path, source) = {
+        let (image_path, source, all) = {
             let mut g = state.lock().unwrap();
             let (Some(path), Some(source)) = (g.current_image().map(|i| i.path.clone()), g.mask_source) else {
                 return;
             };
+            let all = g.all_leaves;
             g.analysis_in_progress = true;
             if let Some(img) = g.images.iter_mut().find(|i| i.path == path) {
                 img.status = AnalysisStatus::Running;
             }
-            (path, source)
+            (path, source, all)
         };
 
         thread::spawn(move || {
-            let result = AnalysisEngine::new().analyze_image(&image_path, source);
+            let result = AnalysisEngine::new().analyze_image(&image_path, source, all);
             let mut g = state.lock().unwrap();
             g.analysis_in_progress = false;
             if let Err(e) = &result {
@@ -151,12 +157,12 @@ impl LeafComplexApp {
         let state = Arc::clone(&self.state);
         let ctx = ctx.clone();
 
-        let (image_paths, source): (Vec<PathBuf>, _) = {
+        let (image_paths, source, all): (Vec<PathBuf>, _, _) = {
             let g = state.lock().unwrap();
             let Some(source) = g.mask_source else { return };
             let selected = g.get_selected_images();
             let paths = if selected.is_empty() { g.images.iter().map(|img| img.path.clone()).collect() } else { selected };
-            (paths, source)
+            (paths, source, g.all_leaves)
         };
 
         if image_paths.is_empty() {
@@ -190,7 +196,7 @@ impl LeafComplexApp {
                     let engine = AnalysisEngine::new();
                     loop {
                         let Some(path) = queue.lock().unwrap().pop() else { break };
-                        let result = engine.analyze_image(&path, source);
+                        let result = engine.analyze_image(&path, source, all);
                         if tx.send((path, result)).is_err() {
                             break;
                         }
@@ -227,16 +233,21 @@ impl LeafComplexApp {
         });
     }
 
-    /// One CSV for the selected (or all) analysed images, same columns as the command line.
+    /// One CSV for the selected (or all) analysed images, same columns as the command line (D116 columns when all
+    /// leaves were measured or a scale is given).
     fn export_results(&mut self) {
-        let rows: Vec<String> = {
+        let (rows, cols): (Vec<String>, Columns) = {
             let g = self.state.lock().unwrap();
+            let cols = Columns { leaves: g.all_leaves, px_per_mm: g.px_per_mm };
             let selected = g.selected_count() > 0;
-            g.images
+            let rows = g
+                .images
                 .iter()
                 .filter(|img| !selected || img.selected)
-                .filter_map(|img| g.analysis_results.get(&img.path).map(|r| csv_row(&img.label, &r.measurement)))
-                .collect()
+                .filter_map(|img| g.analysis_results.get(&img.path).map(|v| (img, v)))
+                .flat_map(|(img, v)| v.iter().map(|r| cols.row_of(&img.label, r.leaf, r.centroid, r.px, &r.measurement)))
+                .collect();
+            (rows, cols)
         };
 
         if rows.is_empty() {
@@ -253,7 +264,7 @@ impl LeafComplexApp {
             return;
         };
 
-        let text = std::iter::once(CSV_HEADER.to_string()).chain(rows.iter().cloned()).collect::<Vec<_>>().join("\n") + "\n";
+        let text = std::iter::once(cols.header()).chain(rows.iter().cloned()).collect::<Vec<_>>().join("\n") + "\n";
         let mut g = self.state.lock().unwrap();
         match fs::write(&path, text) {
             Ok(()) => g.last_message = Some(format!("Exported {} rows to {}", rows.len(), path.display())),

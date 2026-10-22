@@ -8,8 +8,8 @@ use std::time::Instant;
 use rayon::prelude::*;
 
 use crate::v2::{
-    load_alpha_mask, load_mask, load_normalised_mask, measure_normalised_traced, measure_traced, normalise, Mask,
-    MaskSource, Measurement, Trace,
+    leaf_regions, load_alpha_mask, load_normalised_mask, mask_from_image, measure_normalised_traced, measure_traced,
+    normalise, Mask, MaskSource, Measurement, Trace,
 };
 
 /// Version written into every results row.
@@ -45,29 +45,183 @@ fn collect(dir: &Path, recursive: bool, out: &mut Vec<PathBuf>) -> Result<(), St
     Ok(())
 }
 
-/// Measure one image file. Errors: unreadable file, no alpha channel (alpha mode), no leaf pixels.
-pub fn measure_file(path: &Path, source: MaskSource) -> Result<(Measurement, Trace), String> {
-    let raw = load_mask(path, source)?;
-    measure_traced(&raw).ok_or_else(|| format!("{}: no leaf pixels ({} mask)", path.display(), source.as_str()))
+/// Mask check (D115): above this share of leaf pixels outside the kept region, warn.
+pub const DROPPED_WARN: f64 = 0.01;
+/// Mask check (D115), `dark` input only: above this share of grey pixels (32..=223) among the opaque pixels that are
+/// not white (<= 223), warn that the image is probably not a binary mask.
+pub const GREY_WARN: f64 = 0.5;
+
+/// Mask check of one input (D114 B, D115). Warnings only: no value depends on it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct MaskCheck {
+    /// Share of the leaf pixels outside the measured region(s) (dropped by the method).
+    pub dropped_share: f64,
+    /// `dark` input: share of grey pixels among the opaque pixels that are not white; None for `alpha` input.
+    pub grey_share: Option<f64>,
+}
+
+impl MaskCheck {
+    /// Plain-text warnings; empty if the mask looks fine.
+    pub fn warnings(&self) -> Vec<String> {
+        let mut w = Vec::new();
+        if self.dropped_share > DROPPED_WARN {
+            w.push(format!(
+                "{:.1} % of the leaf pixels lie outside the measured region(s) and were not measured",
+                100.0 * self.dropped_share
+            ));
+        }
+        if let Some(g) = self.grey_share.filter(|g| *g > GREY_WARN) {
+            w.push(format!(
+                "{:.0} % of the non-white pixels are grey: the image is probably not a binary mask",
+                100.0 * g
+            ));
+        }
+        w
+    }
+}
+
+/// Share of grey pixels (32..=223) among the opaque (alpha > 127) pixels that are not white (<= 223), on the same
+/// grey values as the `dark` rule. 0 if every pixel is white.
+pub fn grey_share(img: &image::DynamicImage) -> f64 {
+    let luma = img.to_luma8();
+    let alpha: Option<Vec<bool>> =
+        img.color().has_alpha().then(|| img.to_rgba8().pixels().map(|p| p.0[3] > 127).collect());
+    grey_share_of(luma.pixels().enumerate().filter(|(i, _)| alpha.as_ref().is_none_or(|a| a[*i])).map(|(_, p)| p.0[0]))
+}
+
+/// [`grey_share`] of a list of grey values (opaque pixels only).
+pub fn grey_share_of(grey: impl Iterator<Item = u8>) -> f64 {
+    let (mut grey_px, mut not_white) = (0usize, 0usize);
+    for v in grey {
+        if v <= 223 {
+            not_white += 1;
+            if v >= 32 {
+                grey_px += 1;
+            }
+        }
+    }
+    if not_white == 0 {
+        0.0
+    } else {
+        grey_px as f64 / not_white as f64
+    }
+}
+
+/// One measured leaf of an image.
+#[derive(Clone, Debug)]
+pub struct Leaf {
+    /// 1, 2, ... in raster order of each region's first pixel (always 1 for the largest-region run).
+    pub index: usize,
+    /// Mean pixel centre (x, y) of the region in input pixels, pixel-edge coordinates; NaN for the largest-region run.
+    pub centroid: [f64; 2],
+    /// Pixels of the measured region (whole leaf, petiole included).
+    pub px: usize,
+    pub measurement: Measurement,
+    pub trace: Trace,
+}
+
+/// Measure the leaves of one image file, with the image's mask check: the largest region (default), or every leaf
+/// region of D116 (`all_leaves`). Errors: unreadable file, no alpha channel (alpha mode), no leaf pixels.
+pub fn measure_file_leaves(path: &Path, source: MaskSource, all_leaves: bool) -> Result<(Vec<Leaf>, MaskCheck), String> {
+    let img = image::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let raw = mask_from_image(&img, source).map_err(|e| format!("{}: {e}", path.display()))?;
+    let empty = || format!("{}: no leaf pixels ({} mask)", path.display(), source.as_str());
+    let grey_share = (source == MaskSource::Dark).then(|| grey_share(&img));
+    if !all_leaves {
+        let (m, trace) = measure_traced(&raw).ok_or_else(empty)?;
+        let p = trace.placement.as_ref().expect("raw input has a placement");
+        let check = MaskCheck { dropped_share: p.dropped_share(), grey_share };
+        let leaf = Leaf { index: 1, centroid: [f64::NAN; 2], px: p.kept_px, measurement: m, trace };
+        return Ok((vec![leaf], check));
+    }
+    let total = raw.data.iter().filter(|v| **v).count();
+    let mut leaves = Vec::new();
+    for (i, region) in leaf_regions(&raw).into_iter().enumerate() {
+        let (m, mut trace) = measure_traced(&region.mask).ok_or_else(empty)?;
+        // placement in the frame of the whole input
+        if let Some(p) = trace.placement.as_mut() {
+            p.input_size = [raw.rows, raw.cols];
+            p.crop[0] += region.offset[0];
+            p.crop[1] += region.offset[1];
+            p.leaf_px = total;
+        }
+        leaves.push(Leaf { index: i + 1, centroid: region.centroid, px: region.px, measurement: m, trace });
+    }
+    if leaves.is_empty() {
+        return Err(empty());
+    }
+    let measured: usize = leaves.iter().map(|l| l.px).sum();
+    let check = MaskCheck { dropped_share: 1.0 - measured as f64 / total as f64, grey_share };
+    Ok((leaves, check))
+}
+
+/// Measure one image file (largest region), with its mask check.
+pub fn measure_file(path: &Path, source: MaskSource) -> Result<(Measurement, Trace, MaskCheck), String> {
+    let (mut leaves, check) = measure_file_leaves(path, source, false)?;
+    let leaf = leaves.remove(0);
+    Ok((leaf.measurement, leaf.trace, check))
 }
 
 /// Header of the results table.
 pub const CSV_HEADER: &str = "file,EA,MC,elongation,petiole_len,sqrtA_native,EA_flag,MC_flag,version";
 
-/// One row of the results table. Missing values are written as `NA`; numbers in full precision.
+/// Optional columns of the results table (D116); the default has none.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Columns {
+    /// `leaf`, `leaf_x`, `leaf_y` after `file` (all leaves of an image measured).
+    pub leaves: bool,
+    /// `area_mm2` after `sqrtA_native`: pixels of the measured region / px_per_mm^2.
+    pub px_per_mm: Option<f64>,
+}
+
+impl Columns {
+    pub fn header(&self) -> String {
+        let mut h: Vec<&str> = CSV_HEADER.split(',').collect();
+        if self.px_per_mm.is_some() {
+            h.insert(6, "area_mm2");
+        }
+        if self.leaves {
+            h.splice(1..1, ["leaf", "leaf_x", "leaf_y"]);
+        }
+        h.join(",")
+    }
+
+    /// One row of the results table for a leaf of the image `file`.
+    pub fn row(&self, file: &str, leaf: &Leaf) -> String {
+        self.row_of(file, leaf.index, leaf.centroid, leaf.px, &leaf.measurement)
+    }
+
+    /// [`Columns::row`] from the parts of a leaf: number, centroid, pixels, values.
+    pub fn row_of(&self, file: &str, index: usize, centroid: [f64; 2], px: usize, m: &Measurement) -> String {
+        let area = self.px_per_mm.map(|k| px as f64 / (k * k));
+        table_row(file, m, self.leaves.then_some((index, centroid)), area)
+    }
+}
+
+fn num(v: f64) -> String {
+    if v.is_nan() {
+        "NA".to_string()
+    } else {
+        v.to_string()
+    }
+}
+
+/// One row of the results table (default columns). Missing values are written as `NA`; numbers in full precision.
 pub fn csv_row(file: &str, m: &Measurement) -> String {
-    let num = |v: f64| if v.is_nan() { "NA".to_string() } else { v.to_string() };
-    format!(
-        "{},{},{},{},{},{},{},{},{VERSION}",
-        csv_field(file),
-        num(m.ea),
-        num(m.mc),
-        num(m.elongation),
-        num(m.petiole_len),
-        num(m.sqrt_a_native),
-        m.ea_flag.as_str(),
-        m.mc_flag.as_str()
-    )
+    table_row(file, m, None, None)
+}
+
+fn table_row(file: &str, m: &Measurement, leaf: Option<(usize, [f64; 2])>, area: Option<f64>) -> String {
+    let mut f = vec![csv_field(file)];
+    if let Some((i, c)) = leaf {
+        f.extend([i.to_string(), num(c[0]), num(c[1])]);
+    }
+    f.extend([num(m.ea), num(m.mc), num(m.elongation), num(m.petiole_len), num(m.sqrt_a_native)]);
+    if let Some(a) = area {
+        f.push(num(a));
+    }
+    f.extend([m.ea_flag.as_str().to_string(), m.mc_flag.as_str().to_string(), VERSION.to_string()]);
+    f.join(",")
 }
 
 /// Quote a text field if it holds a comma, quote or line break (RFC 4180).

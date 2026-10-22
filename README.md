@@ -43,8 +43,10 @@ of √A, so the values do not depend on image resolution or leaf size.
 
 ## Input
 
-One leaf per image. If there are several separate regions, the largest one is measured. You must say which
-pixels are leaf; there is no default:
+By default, one leaf per image: if there are several separate regions, the largest one is measured. With
+`--all-leaves` (GUI: *All leaves*), every region with √A ≥ 250 px is measured as a leaf, one row each, numbered in
+raster order; if no region is that large, the largest one is measured. You must say which pixels are leaf; there
+is no default:
 
 | `--mask-source` | Leaf pixels | Typical input |
 |---|---|---|
@@ -53,6 +55,11 @@ pixels are leaf; there is no default:
 
 `dark` is meant for black-and-white masks. On a photograph it measures whatever falls below the threshold, so
 make a mask first.
+
+**Mask check.** Two warnings help to spot bad input; they change no value. (1) More than 1 % of the leaf pixels lie
+outside the largest region, so they were not measured. (2) `dark` input only: more than half of the pixels that are
+not white (grey value ≤ 223) are grey (32–223), so the image is probably a photograph, not a binary mask. The
+command line prints them as `warning:` lines on standard error; the GUI lists them with the results.
 
 ---
 
@@ -66,7 +73,8 @@ shapecomplexity_cli measure leaves/ --mask-source alpha -o results.csv
 shapecomplexity_cli measure leaf1.png leaf2.jpg --mask-source dark > results.csv
 ```
 
-Options: `-o/--output` (default: standard output), `-r/--recursive`, `-j/--threads` (default: all cores).
+Options: `-o/--output` (default: standard output), `-r/--recursive`, `-j/--threads` (default: all cores),
+`--all-leaves` (see *Input*), `--px-per-mm <scale>` (adds the leaf area in mm²).
 Files that fail are reported on standard error and left out of the table; the exit code is then 1.
 
 ### Output columns
@@ -82,6 +90,10 @@ Files that fail are reported on standard error and left out of the table; the ex
 | `EA_flag`, `MC_flag` | `ok`, `below_recommended` or `not_resolved` |
 | `version` | ShapeComplexity version |
 
+Optional columns: with `--all-leaves`, `leaf` (1, 2, …), `leaf_x` and `leaf_y` (centre of the region in input
+pixels, 0 = left/top edge of the image) follow `file`; with `--px-per-mm`, `area_mm2` (pixels of the measured
+region, petiole included, / scale²) follows `sqrtA_native`.
+
 `shapecomplexity_cli port-check <manifest.csv> <out.csv> <mask_dir>` runs the check against the Python reference
 implementation (see *Testing*).
 
@@ -95,9 +107,24 @@ implementation (see *Testing*).
 4. **▶ Analyze** (current image) or **⏩ Analyze All / Selected**.
 5. **File → Export Results** writes one CSV with the same columns as the command line.
 
-The view shows the normalised mask (grey: L′; orange: removed petiole) with the outline (blue) and the blade
-line (magenta). The right panel shows the values, h(s) and ln(e(k)/τ). Click on the h(s) plot to see that point
-on the leaf.
+*All leaves* and *px/mm* in the toolbar work as `--all-leaves` and `--px-per-mm`. With several leaves, pick one
+with the *Leaf* buttons; the input view shows the leaf numbers.
+
+The panels follow Fig. 1 of the paper:
+
+- **Image view.** *Normalised mask*: the mask as measured (√A = 1000 px; grey: blade L′, black: removed petiole),
+  with the outline (black) and the blade line (blue). *Margin band* colours the leaf outside the blade line orange
+  and the background inside it peach. *Input image*: the input with the normalised mask placed over it, to check
+  which pixels were measured. Scroll to zoom, drag to pan.
+- **Results**: the values, flags, dropped area, the share of grey pixels (`dark` input) and any warnings. Leaves
+  with a flag other than `ok` or a warning are marked ⚠ in the image strip.
+- **(c) h(s)**: the margin profile along the blade line (orange outside, peach inside); EA. The part of the outline
+  on screen in the image view is shaded grey. Click to see that point on the leaf.
+- **(d)** the whitened blade line and its elliptic Fourier fit; a slider sets the number of harmonics k.
+- **(e)** ln(e(k)/τ); the shaded area is MC; the chosen k is marked.
+- **Morphospace** (tab above the right panel): EA against MC for every analysed leaf. Up to three subfolders get
+  their own colour; with more, pick one to highlight. Hollow points: a flag other than `ok` or a warning. Click a
+  point to open that leaf.
 
 ---
 
@@ -117,7 +144,9 @@ cargo build --release            # leaf_complex_gui/target/release/leaf_complex_
 ```
 
 The library is the crate `shapecomplexity`: `v2::measure(&mask)` returns the values; `v2::measure_traced(&mask)`
-also returns the intermediate stages (normalised mask, L′, outline, blade line, h(s), e(k)).
+also returns the intermediate stages (normalised mask, L′, outline, blade line, h(s), e(k), whitened blade line,
+and where the normalised mask lies in the input). `v2::metrics::efd_reconstruct(&white, k)` gives the k-harmonic
+fit; `batch::measure_file` adds the mask check.
 
 ---
 

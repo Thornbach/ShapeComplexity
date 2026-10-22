@@ -128,28 +128,40 @@ pub fn round_half_even(x: f64) -> i64 {
 
 // --- input -----------------------------------------------------------------------------------------------------
 
-/// Leaf mask from the alpha channel of an image (alpha > 127). Images without alpha are refused.
-pub fn load_alpha_mask(path: &Path) -> Result<Mask, String> {
-    let img = image::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+/// Leaf mask from the alpha channel of a decoded image (alpha > 127); None if the image has no alpha channel.
+pub fn alpha_mask(img: &image::DynamicImage) -> Option<Mask> {
     if !img.color().has_alpha() {
-        return Err(format!("{}: no alpha channel; the leaf must be the opaque part of the image", path.display()));
+        return None;
     }
     let rgba = img.to_rgba8();
     let (w, h) = (rgba.width() as usize, rgba.height() as usize);
-    Ok(Grid::from_vec(h, w, rgba.pixels().map(|p| p.0[3] > 127).collect()))
+    Some(Grid::from_vec(h, w, rgba.pixels().map(|p| p.0[3] > 127).collect()))
 }
 
-/// Leaf mask from a binary image with a dark leaf on a light background: grey value < 128 (the `image` crate's
-/// luma of the colour channels). Pixels with alpha <= 127 never count as leaf. Meant for black-and-white masks;
-/// on a photograph the result is whatever falls below the threshold.
-pub fn load_dark_mask(path: &Path) -> Result<Mask, String> {
-    let img = image::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+/// Leaf mask from a decoded binary image with a dark leaf on a light background: grey value < 128 (the `image`
+/// crate's luma of the colour channels). Pixels with alpha <= 127 never count as leaf. Meant for black-and-white
+/// masks; on a photograph the result is whatever falls below the threshold.
+pub fn dark_mask(img: &image::DynamicImage) -> Mask {
     let luma = img.to_luma8();
     let alpha: Option<Vec<bool>> =
         img.color().has_alpha().then(|| img.to_rgba8().pixels().map(|p| p.0[3] > 127).collect());
     let (w, h) = (luma.width() as usize, luma.height() as usize);
     let data = luma.pixels().enumerate().map(|(i, p)| p.0[0] < 128 && alpha.as_ref().is_none_or(|a| a[i])).collect();
-    Ok(Grid::from_vec(h, w, data))
+    Grid::from_vec(h, w, data)
+}
+
+fn open_image(path: &Path) -> Result<image::DynamicImage, String> {
+    image::open(path).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// Leaf mask from the alpha channel of an image file (alpha > 127). Images without alpha are refused.
+pub fn load_alpha_mask(path: &Path) -> Result<Mask, String> {
+    load_mask(path, MaskSource::Alpha)
+}
+
+/// Leaf mask of an image file with a dark leaf on a light background (see [`dark_mask`]).
+pub fn load_dark_mask(path: &Path) -> Result<Mask, String> {
+    load_mask(path, MaskSource::Dark)
 }
 
 /// Which pixels of an input image are leaf. There is no default: the user always says which rule applies.
@@ -170,12 +182,19 @@ impl MaskSource {
     }
 }
 
+/// Leaf mask of a decoded image by the chosen rule.
+pub fn mask_from_image(img: &image::DynamicImage, source: MaskSource) -> Result<Mask, String> {
+    match source {
+        MaskSource::Alpha => {
+            alpha_mask(img).ok_or_else(|| "no alpha channel; the leaf must be the opaque part of the image".into())
+        }
+        MaskSource::Dark => Ok(dark_mask(img)),
+    }
+}
+
 /// Leaf mask of an image file by the chosen rule.
 pub fn load_mask(path: &Path, source: MaskSource) -> Result<Mask, String> {
-    match source {
-        MaskSource::Alpha => load_alpha_mask(path),
-        MaskSource::Dark => load_dark_mask(path),
-    }
+    mask_from_image(&open_image(path)?, source).map_err(|e| format!("{}: {e}", path.display()))
 }
 
 /// An already normalised mask (1-bit PNG; any non-zero pixel = leaf).
@@ -187,20 +206,125 @@ pub fn load_normalised_mask(path: &Path) -> Result<Mask, String> {
 
 // --- pipeline --------------------------------------------------------------------------------------------------
 
+/// Where the normalised mask lies in the input image, and how much leaf it keeps. For display and checks only.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Placement {
+    /// Size of the input mask (rows, cols).
+    pub input_size: [usize; 2],
+    /// Crop box of the kept region in the input: first row, first column, rows, cols.
+    pub crop: [usize; 4],
+    /// Size of the scaled crop before padding (rows, cols).
+    pub scaled_size: [usize; 2],
+    /// Nominal scale factor SQRT_A / native sqrt(A).
+    pub factor: f64,
+    /// Leaf pixels of the input mask, and those in the kept (largest) region.
+    pub leaf_px: usize,
+    pub kept_px: usize,
+}
+
+impl Placement {
+    /// Input-image position of a position in the normalised mask; both as (x, y) in pixel-edge units
+    /// (0 = left or top edge of the picture). Uses the exact per-axis ratio of the resize (crop / scaled size).
+    pub fn to_input(&self, x: f64, y: f64) -> (f64, f64) {
+        let pad = PAD_NORM as f64;
+        let sx = self.crop[3] as f64 / self.scaled_size[1] as f64;
+        let sy = self.crop[2] as f64 / self.scaled_size[0] as f64;
+        (self.crop[1] as f64 + (x - pad) * sx, self.crop[0] as f64 + (y - pad) * sy)
+    }
+
+    /// Share of the input leaf pixels outside the kept region.
+    pub fn dropped_share(&self) -> f64 {
+        1.0 - self.kept_px as f64 / self.leaf_px as f64
+    }
+}
+
 /// Largest component, crop, isotropic Pillow-bilinear scale to sqrt(A) = SQRT_A, threshold, pad.
 /// Returns the normalised mask and the native sqrt(leaf area) in px; None for an empty mask.
 pub fn normalise(raw: &Mask) -> Option<(Mask, f64)> {
+    normalise_placed(raw).map(|(m, native, _)| (m, native))
+}
+
+/// [`normalise`], also returning where the normalised mask lies in the input.
+pub fn normalise_placed(raw: &Mask) -> Option<(Mask, f64, Placement)> {
     let m = mask::largest_component(raw);
     let (r0, r1, c0, c1) = mask::bbox(&m)?;
     let m = mask::crop(&m, r0, r1, c0, c1);
-    let native = (m.data.iter().filter(|v| **v).count() as f64).sqrt();
+    let kept_px = m.data.iter().filter(|v| **v).count();
+    let native = (kept_px as f64).sqrt();
     let f = SQRT_A / native;
     let img = Grid::from_vec(m.rows, m.cols, m.data.iter().map(|v| if *v { 255u8 } else { 0 }).collect());
     let out_cols = round_half_even(m.cols as f64 * f) as usize;
     let out_rows = round_half_even(m.rows as f64 * f) as usize;
     let r = resize::resize_bilinear(&img, out_cols, out_rows);
     let scaled = Grid::from_vec(r.rows, r.cols, r.data.iter().map(|v| *v > 127).collect());
-    Some((mask::pad(&scaled, PAD_NORM), native))
+    let placement = Placement {
+        input_size: [raw.rows, raw.cols],
+        crop: [r0, c0, m.rows, m.cols],
+        scaled_size: [r.rows, r.cols],
+        factor: f,
+        leaf_px: raw.data.iter().filter(|v| **v).count(),
+        kept_px,
+    };
+    Some((mask::pad(&scaled, PAD_NORM), native, placement))
+}
+
+/// One region measured as a leaf when all leaves of an image are measured (D116).
+#[derive(Clone, Debug)]
+pub struct Region {
+    /// The region alone, cropped to its bounding box.
+    pub mask: Mask,
+    /// First row and column of the crop in the input.
+    pub offset: [usize; 2],
+    /// Pixels of the region.
+    pub px: usize,
+    /// Mean pixel centre (x, y) in input pixels, pixel-edge coordinates (0 = left/top edge).
+    pub centroid: [f64; 2],
+}
+
+/// Leaf regions of a mask (D116): the 4-connected regions with native sqrt(A) >= FLOOR_MIN, in raster order of their
+/// first pixel; if none reaches the floor, the largest region alone. Empty for an empty mask. Measuring a region's
+/// mask gives the same values as measuring the whole mask when that region is the largest.
+pub fn leaf_regions(raw: &Mask) -> Vec<Region> {
+    let (lab, n) = mask::label(raw, false);
+    let n = n as usize;
+    if n == 0 {
+        return Vec::new();
+    }
+    // per label: pixels, bounding box, sums of rows and columns
+    let mut px = vec![0usize; n + 1];
+    let mut bb = vec![[usize::MAX, 0, usize::MAX, 0]; n + 1];
+    let mut sum = vec![[0.0f64; 2]; n + 1];
+    for r in 0..lab.rows {
+        for c in 0..lab.cols {
+            let l = lab.get(r, c) as usize;
+            if l == 0 {
+                continue;
+            }
+            px[l] += 1;
+            let b = &mut bb[l];
+            *b = [b[0].min(r), b[1].max(r), b[2].min(c), b[3].max(c)];
+            sum[l][0] += c as f64;
+            sum[l][1] += r as f64;
+        }
+    }
+    let mut keep: Vec<usize> = (1..=n).filter(|&l| (px[l] as f64).sqrt() >= FLOOR_MIN).collect();
+    if keep.is_empty() {
+        // largest region, first of equal ones (as `largest_component`)
+        keep.push((1..=n).fold(1, |best, l| if px[l] > px[best] { l } else { best }));
+    }
+    keep.iter()
+        .map(|&l| {
+            let [r0, r1, c0, c1] = bb[l];
+            let mut m = Mask::new(r1 - r0 + 1, c1 - c0 + 1);
+            for r in r0..=r1 {
+                for c in c0..=c1 {
+                    m.set(r - r0, c - c0, lab.get(r, c) as usize == l);
+                }
+            }
+            let k = px[l] as f64;
+            Region { mask: m, offset: [r0, c0], px: px[l], centroid: [sum[l][0] / k + 0.5, sum[l][1] / k + 0.5] }
+        })
+        .collect()
 }
 
 /// Resolution flag of a value (D44).
@@ -266,6 +390,10 @@ pub struct Trace {
     /// Error curve e(k) / sqrt(A) of the whitened blade line, k = 1, 2, ... (MC sums its log excess over TAU).
     /// Empty if MC was not computed.
     pub error_curve: Vec<f64>,
+    /// Whitened, resampled blade line (input of e(k)), px at sqrt(A) = SQRT_A, centred on the blade's centroid.
+    pub white: Vec<Point>,
+    /// Where the normalised mask lies in the input image; None for an already normalised mask.
+    pub placement: Option<Placement>,
 }
 
 /// All v2 numbers for a normalised mask; `native` = sqrt(A) in px before normalisation (for the flags).
@@ -286,13 +414,16 @@ pub fn measure_normalised_traced(m: &Mask, native: Option<f64>) -> (Measurement,
     let e = if mc_flag != Flag::NotResolved { metrics::error_curve(&white) } else { Vec::new() };
     let mc = if mc_flag != Flag::NotResolved { metrics::macro_complexity_from_curve(&e) } else { f64::NAN };
     let meas = Measurement { ea, mc, elongation, petiole_len, sqrt_a_native: native.unwrap_or(f64::NAN), ea_flag, mc_flag };
-    (meas, Trace { norm: m.clone(), lp, outline: c, blade_line: bl, margin_profile: h, error_curve: e })
+    let trace = Trace { norm: m.clone(), lp, outline: c, blade_line: bl, margin_profile: h, error_curve: e, white, placement: None };
+    (meas, trace)
 }
 
 /// All v2 numbers for a raw leaf mask (any size). None for an empty mask.
 pub fn measure_traced(raw: &Mask) -> Option<(Measurement, Trace)> {
-    let (m, native) = normalise(raw)?;
-    Some(measure_normalised_traced(&m, Some(native)))
+    let (m, native, placement) = normalise_placed(raw)?;
+    let (meas, mut trace) = measure_normalised_traced(&m, Some(native));
+    trace.placement = Some(placement);
+    Some((meas, trace))
 }
 
 /// All v2 numbers for a raw leaf mask (any size). None for an empty mask.
