@@ -25,12 +25,19 @@ const OVERLAY_OUTLINE: egui::Color32 = egui::Color32::from_rgb(220, 0, 170);
 const RED_COLOR: egui::Color32 = egui::Color32::from_rgb(255, 0, 0);
 const WARN_COLOR: egui::Color32 = egui::Color32::from_rgb(230, 140, 0);
 
-fn source_label(s: Option<MaskSource>) -> &'static str {
+fn source_label(s: MaskSource) -> &'static str {
     match s {
-        None => "Choose mask source…",
-        Some(MaskSource::Alpha) => "Alpha: opaque = leaf",
-        Some(MaskSource::Dark) => "Dark: dark = leaf",
+        MaskSource::Auto => "Mask: auto",
+        MaskSource::Alpha => "Mask: alpha (opaque = leaf)",
+        MaskSource::Dark => "Mask: dark (dark = leaf)",
     }
+}
+
+/// The main action button: large and in the accent colour, so that it is easy to find.
+fn analyze_button(text: &str) -> egui::Button<'static> {
+    egui::Button::new(egui::RichText::new(text).size(16.0).strong().color(egui::Color32::WHITE))
+        .fill(BLUE)
+        .min_size(egui::vec2(0.0, 30.0))
 }
 
 pub fn render_image_view(
@@ -57,15 +64,14 @@ pub fn render_image_view(
             egui::ComboBox::from_id_salt("mask_source")
                 .selected_text(source_label(source))
                 .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut source, Some(MaskSource::Alpha), "Alpha: opaque pixels of a cut-out are leaf");
-                    ui.selectable_value(&mut source, Some(MaskSource::Dark), "Dark: dark pixels of a binary image are leaf");
+                    ui.selectable_value(&mut source, MaskSource::Auto, "Auto: alpha if the image has transparent pixels, else dark");
+                    ui.selectable_value(&mut source, MaskSource::Alpha, "Alpha: opaque pixels of a cut-out are leaf");
+                    ui.selectable_value(&mut source, MaskSource::Dark, "Dark: dark pixels of a binary image are leaf");
                 })
                 .response
-                .on_hover_text("Which pixels are leaf. There is no default; results are cleared when this changes.");
+                .on_hover_text("Which pixels are leaf. Auto decides per image; results are cleared when this changes.");
         });
-        if let Some(s) = source {
-            state.lock().unwrap().set_mask_source(s);
-        }
+        state.lock().unwrap().set_mask_source(source);
 
         ui.separator();
 
@@ -73,9 +79,9 @@ pub fn render_image_view(
             let g = state.lock().unwrap();
             (g.current_image().is_some(), g.selected_count())
         };
-        let ready = source.is_some() && !busy;
+        let ready = !busy;
         ui.add_enabled_ui(has_current && ready, |ui| {
-            if ui.button("▶ Analyze").clicked() {
+            if ui.add(analyze_button("▶ Analyze")).on_hover_text("Analyse the image on screen").clicked() {
                 *analyze_clicked = true;
             }
         });
@@ -267,17 +273,29 @@ pub fn render_image_view(
                 None => "Open a workspace folder to begin".to_string(),
                 Some(p) => match g.errors.get(p) {
                     Some(e) => format!("Analysis failed:\n{e}"),
-                    None if g.mask_source.is_none() => "Choose the mask source, then click 'Analyze'".to_string(),
-                    None => "Click 'Analyze' to start the analysis".to_string(),
+                    None => String::new(),
                 },
             };
-            painter.text(
-                rect.center(),
-                egui::Align2::CENTER_CENTER,
-                text,
-                egui::FontId::proportional(16.0),
-                ui.visuals().text_color(),
-            );
+            if text.is_empty() {
+                // not analysed yet: a large button in the middle of the view
+                let busy = g.analysis_in_progress || g.batch_processing;
+                let button = egui::Rect::from_center_size(rect.center(), egui::vec2(260.0, 48.0));
+                let clicked = ui
+                    .put(button, analyze_button("▶ Analyze this image").min_size(button.size()))
+                    .on_hover_text("Measure EA and MC of this image (or use ⏩ Analyze All in the toolbar)")
+                    .clicked();
+                if clicked && !busy {
+                    *analyze_clicked = true;
+                }
+            } else {
+                painter.text(
+                    rect.center(),
+                    egui::Align2::CENTER_CENTER,
+                    text,
+                    egui::FontId::proportional(16.0),
+                    ui.visuals().text_color(),
+                );
+            }
         }
     }
     g.visible_runs = visible_runs;
@@ -337,7 +355,8 @@ pub fn render_results_panel(ui: &mut egui::Ui, state: &Arc<Mutex<AppState>>) {
                 "Dark input: grey pixels (32–223) among the pixels that are not white. Warning above 50 %.",
             );
         }
-        row("Mask source", g.mask_source.map_or("-", |s| s.as_str()).to_string(), "Which pixels were read as leaf");
+        let how = if g.mask_source == MaskSource::Auto { " (auto)" } else { "" };
+        row("Mask source", format!("{}{how}", r.source.as_str()), "Which pixels were read as leaf");
         row("Version", VERSION.to_string(), "ShapeComplexity version");
     });
     for c in r.concerns() {
@@ -388,6 +407,8 @@ pub fn render_margin_plot(ui: &mut egui::Ui, state: &Arc<Mutex<AppState>>) {
     let ink = ui.visuals().text_color();
     let line = Line::new(h.iter().enumerate().map(|(i, v)| [s[i], *v]).collect::<PlotPoints>()).color(ink).width(0.5);
     let response = Plot::new("margin_plot")
+        .allow_scroll(false)
+        .allow_zoom(false)
         .height(200.0)
         .x_axis_label("s, arc length along the blade line (√A)")
         .y_axis_label("h (√A)")
@@ -449,6 +470,8 @@ pub fn render_fit_plot(ui: &mut egui::Ui, state: &Arc<Mutex<AppState>>) {
     };
     let ink = ui.visuals().text_color();
     Plot::new("fit_plot")
+        .allow_scroll(false)
+        .allow_zoom(false)
         .height(260.0)
         .data_aspect(1.0)
         .show_axes(false)
@@ -492,6 +515,8 @@ pub fn render_error_plot(ui: &mut egui::Ui, state: &Arc<Mutex<AppState>>) {
         .collect();
     let ink = ui.visuals().text_color();
     Plot::new("error_plot")
+        .allow_scroll(false)
+        .allow_zoom(false)
         .height(200.0)
         .x_axis_label("k (harmonics)")
         .y_axis_label("ln(e(k)/τ)")

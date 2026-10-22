@@ -31,6 +31,8 @@ pub struct MorphResult {
     pub centroid: [f64; 2],
     /// Pixels of the measured region.
     pub px: usize,
+    /// The rule applied (`Auto` resolved, D117).
+    pub source: MaskSource,
     pub measurement: Measurement,
     pub trace: Trace,
     /// Mask check (dropped area, non-binary `dark` input); warnings only.
@@ -60,11 +62,16 @@ pub fn analyze_rgba(rgba: &[u8], width: u32, height: u32, source: MaskSource) ->
         return Err("analyze_rgba: buffer is not width*height*4 bytes".into());
     }
     let grey = |p: &[u8]| image::Pixel::to_luma(&image::Rgb([p[0], p[1], p[2]])).0[0];
+    let source = match source {
+        MaskSource::Auto if rgba.chunks_exact(4).any(|p| p[3] <= 127) => MaskSource::Alpha,
+        MaskSource::Auto => MaskSource::Dark,
+        s => s,
+    };
     let data = rgba
         .chunks_exact(4)
         .map(|p| match source {
             MaskSource::Alpha => p[3] > 127,
-            MaskSource::Dark => grey(p) < 128 && p[3] > 127,
+            _ => grey(p) < 128 && p[3] > 127,
         })
         .collect();
     let (measurement, trace) = measure_traced(&Grid::from_vec(h, w, data)).ok_or("no leaf pixels")?;
@@ -74,11 +81,11 @@ pub fn analyze_rgba(rgba: &[u8], width: u32, height: u32, source: MaskSource) ->
             .then(|| grey_share_of(rgba.chunks_exact(4).filter(|p| p[3] > 127).map(grey))),
     };
     let px = trace.placement.as_ref().map_or(0, |p| p.kept_px);
-    Ok(build(Leaf { index: 1, centroid: [f64::NAN; 2], px, measurement, trace }, check))
+    Ok(build(Leaf { index: 1, centroid: [f64::NAN; 2], px, source, measurement, trace }, check))
 }
 
 fn build(leaf: Leaf, check: MaskCheck) -> MorphResult {
-    let Leaf { index, centroid, px, measurement, trace } = leaf;
+    let Leaf { index, centroid, px, source, measurement, trace } = leaf;
     let (norm, lp) = (&trace.norm, &trace.lp);
     let mut rgba = Vec::with_capacity(norm.data.len() * 4);
     for (n, l) in norm.data.iter().zip(&lp.data) {
@@ -95,5 +102,5 @@ fn build(leaf: Leaf, check: MaskCheck) -> MorphResult {
     let to_xy = |pts: &[[f64; 2]]| pts.iter().map(|p| [(p[1] + off) as f32, (p[0] + off) as f32]).collect();
     let outline_xy = to_xy(&trace.outline);
     let blade_line_xy = to_xy(&trace.blade_line);
-    MorphResult { leaf: index, centroid, px, measurement, trace, check, mask_image, outline_xy, blade_line_xy }
+    MorphResult { leaf: index, centroid, px, source, measurement, trace, check, mask_image, outline_xy, blade_line_xy }
 }

@@ -20,13 +20,15 @@ v2.0.0 replaces the v1 method. The numbers of v1.0.0 cannot be reproduced with t
   - The trace of `measure_traced` also holds h(s) and e(k), for display. Computing them once for both the value
     and the trace does not change any value (all fixture tests still bit-identical).
 - Input rule `MaskSource`: `alpha` (alpha > 127; images without alpha are refused) or `dark` (grey value < 128,
-  transparent pixels never leaf; for binary masks with a dark leaf on a light background). There is no default:
-  the CLI option `--mask-source` is required, and the GUI asks for it before it analyses.
+  transparent pixels never leaf; for binary masks with a dark leaf on a light background), or `auto` (D117, the
+  default in CLI and GUI): per image, `alpha` if the image has a pixel with alpha ≤ 127, else `dark`. The rule
+  applied is written to the column `mask_source`.
 - `src/batch.rs`, shared by the CLI and the GUI: image listing (png, jpg, jpeg, tif, tiff, bmp), `measure_file`,
   the results table, the port check.
 - CLI subcommands:
-  - `measure <files or folders> --mask-source alpha|dark [-o out.csv] [-r] [-j N]`: one row per image with columns
-    file, EA, MC, elongation, petiole_len, sqrtA_native, EA_flag, MC_flag, version (missing values `NA`).
+  - `measure <files or folders> [--mask-source auto|alpha|dark] [-o out.csv] [-r] [-j N]`: one row per image with
+    columns file, EA, MC, elongation, petiole_len, sqrtA_native, EA_flag, MC_flag, mask_source, version (missing
+    values `NA`).
   - `port-check <manifest> <out> <mask_dir>`: the check against the Python reference (replaces the temporary
     `port_check` binary).
 - GUI on the same pipeline (`gui_api::analyze` → `v2::measure_traced`): normalised mask with removed petiole,
@@ -57,6 +59,9 @@ v2.0.0 replaces the v1 method. The numbers of v1.0.0 cannot be reproduced with t
 - GUI morphospace (D114 C): EA–MC scatter of all analysed leaves in a *Morphospace* tab. Colour by subfolder (up to
   three, fixed by name order; with more, one highlighted subfolder, the rest grey); hollow points for leaves with a
   flag other than `ok` or a mask warning; the leaf on screen ringed; hover shows the file, a click opens the leaf.
+- GUI usability (Tobias's click-test, s38): plots in the right panel no longer take the mouse wheel (the panel
+  scrolls); margin band on by default; *Analyze* is a large accent button, and an empty view shows a large
+  *Analyze this image* button.
 - `tests/synthetic.rs`: synthetic shapes (circle EA ≈ 0, MC = 0, elongation 1, no petiole; ellipses MC = 0 and
   elongation = aspect ratio within 2 %; teeth raise EA; lobes raise MC; flags at √A = 200, 300, 600 px), the `alpha`
   and `dark` inputs give identical values, the results row; `efd_reconstruct` gives e(1) of the error curve (relative

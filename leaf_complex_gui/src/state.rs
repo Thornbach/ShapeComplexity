@@ -53,6 +53,8 @@ pub struct AnalysisResult {
     pub centroid: [f64; 2],
     /// Pixels of the measured region (for the area).
     pub px: usize,
+    /// The rule applied to the image (`Auto` resolved, D117).
+    pub source: MaskSource,
     pub measurement: Measurement,
     pub mask: PackedMask,
     /// Outline and blade line as (x, y) in pixel units of the mask picture.
@@ -121,8 +123,8 @@ pub struct AppState {
     pub images: Vec<ImageInfo>,
     pub current_image_index: Option<usize>,
 
-    /// Which pixels are leaf. None until the user chooses: there is no default.
-    pub mask_source: Option<MaskSource>,
+    /// Which pixels are leaf; `Auto` (default, D117) decides per image.
+    pub mask_source: MaskSource,
 
     /// Measure every leaf region of an image (D116) instead of the largest region. Results are cleared when it changes.
     pub all_leaves: bool,
@@ -175,7 +177,7 @@ impl Default for AppState {
             workspace_dir: None,
             images: Vec::new(),
             current_image_index: None,
-            mask_source: None,
+            mask_source: MaskSource::Auto,
             all_leaves: false,
             px_per_mm: None,
             px_per_mm_text: String::new(),
@@ -193,7 +195,7 @@ impl Default for AppState {
             view_mode: ViewMode::Mask,
             show_outline: true,
             show_blade_line: true,
-            show_band: false,
+            show_band: true,
             visible_runs: Vec::new(),
             efd_k: 3,
             central_view: CentralView::Leaf,
@@ -244,8 +246,8 @@ impl AppState {
 
     /// Results depend on the mask source, so a new source drops them.
     pub fn set_mask_source(&mut self, source: MaskSource) {
-        if self.mask_source != Some(source) {
-            self.mask_source = Some(source);
+        if self.mask_source != source {
+            self.mask_source = source;
             self.clear_results();
         }
     }

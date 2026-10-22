@@ -164,9 +164,26 @@ fn alpha_and_dark_inputs_give_the_same_result() {
     let (d2, _, _) = measure_file(&pa, MaskSource::Dark).unwrap();
     // an image without alpha is refused in alpha mode
     let refused = measure_file(&pd, MaskSource::Alpha);
-    let _ = std::fs::remove_file(&pa);
-    let _ = std::fs::remove_file(&pd);
-    for x in [&d, &d2] {
+    // auto (D117): the cut-out resolves to alpha, the binary image and a fully opaque RGBA mask to dark
+    let opaque = image::RgbaImage::from_fn(w, h, |x, y| {
+        image::Rgba(if m.get(y as usize, x as usize) { [0, 0, 0, 255] } else { [255, 255, 255, 255] })
+    });
+    let po = temp_png("opaque");
+    opaque.save(&po).unwrap();
+    let auto: Vec<_> = [&pa, &pd, &po]
+        .iter()
+        .map(|p| {
+            let (mut l, _) = measure_file_leaves(p, MaskSource::Auto, false).unwrap();
+            let l = l.remove(0);
+            (l.source, l.measurement)
+        })
+        .collect();
+    for p in [&pa, &pd, &po] {
+        let _ = std::fs::remove_file(p);
+    }
+    assert_eq!(auto.iter().map(|a| a.0).collect::<Vec<_>>(), [MaskSource::Alpha, MaskSource::Dark, MaskSource::Dark]);
+    let (a1, a2, a3) = (&auto[0].1, &auto[1].1, &auto[2].1);
+    for x in [&d, &d2, a1, a2, a3] {
         assert_eq!(a.ea.to_bits(), x.ea.to_bits());
         assert_eq!(a.mc.to_bits(), x.mc.to_bits());
         assert_eq!(a.elongation.to_bits(), x.elongation.to_bits());
@@ -178,11 +195,14 @@ fn alpha_and_dark_inputs_give_the_same_result() {
 #[test]
 fn results_row() {
     let m = run(&polar(5.0, 0.2, 0.0, 0.0), 200.0);
-    let row = csv_row("a,b/leaf.png", &m);
+    let row = csv_row("a,b/leaf.png", &m, MaskSource::Dark);
     let header: Vec<&str> = CSV_HEADER.split(',').collect();
-    assert_eq!(header, ["file", "EA", "MC", "elongation", "petiole_len", "sqrtA_native", "EA_flag", "MC_flag", "version"]);
+    assert_eq!(
+        header,
+        ["file", "EA", "MC", "elongation", "petiole_len", "sqrtA_native", "EA_flag", "MC_flag", "mask_source", "version"]
+    );
     assert!(row.starts_with("\"a,b/leaf.png\",NA,NA,"), "{row}");
-    assert!(row.ends_with(&format!(",not_resolved,not_resolved,{}", env!("CARGO_PKG_VERSION"))), "{row}");
+    assert!(row.ends_with(&format!(",not_resolved,not_resolved,dark,{}", env!("CARGO_PKG_VERSION"))), "{row}");
 }
 
 // --- display and mask-check helpers (D114, D115): they must not change any value ------------------------------------
@@ -354,7 +374,7 @@ fn optional_columns() {
     let cols = Columns { leaves: true, px_per_mm: Some(20.0) };
     assert_eq!(
         cols.header(),
-        "file,leaf,leaf_x,leaf_y,EA,MC,elongation,petiole_len,sqrtA_native,area_mm2,EA_flag,MC_flag,version"
+        "file,leaf,leaf_x,leaf_y,EA,MC,elongation,petiole_len,sqrtA_native,area_mm2,EA_flag,MC_flag,mask_source,version"
     );
     let img = render(&polar(5.0, 0.2, 0.0, 0.0), 300.0);
     let path = save_dark(&img, "cols");
@@ -363,10 +383,11 @@ fn optional_columns() {
     let _ = std::fs::remove_file(&path);
     let row = cols.row("leaf.png", &leaves[0]);
     let f: Vec<&str> = row.split(',').collect();
-    assert_eq!(f.len(), 13);
+    assert_eq!(f.len(), 14);
+    assert_eq!(f[12], "dark");
     assert_eq!(f[1], "1");
     assert_eq!(f[9].parse::<f64>().unwrap(), leaves[0].px as f64 / 400.0);
-    assert_eq!(Columns::default().row("leaf.png", &default[0]), csv_row("leaf.png", &default[0].measurement));
+    assert_eq!(Columns::default().row("leaf.png", &default[0]), csv_row("leaf.png", &default[0].measurement, MaskSource::Dark));
     // the same leaf, with and without the option: identical values
-    assert_eq!(f[4..9].join(","), csv_row("x", &default[0].measurement).split(',').skip(1).take(5).collect::<Vec<_>>().join(","));
+    assert_eq!(f[4..9].join(","), csv_row("x", &default[0].measurement, MaskSource::Dark).split(',').skip(1).take(5).collect::<Vec<_>>().join(","));
 }

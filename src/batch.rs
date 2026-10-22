@@ -116,6 +116,8 @@ pub struct Leaf {
     pub centroid: [f64; 2],
     /// Pixels of the measured region (whole leaf, petiole included).
     pub px: usize,
+    /// The rule applied to the image (`Alpha` or `Dark`; `Auto` resolved, D117).
+    pub source: MaskSource,
     pub measurement: Measurement,
     pub trace: Trace,
 }
@@ -124,6 +126,7 @@ pub struct Leaf {
 /// region of D116 (`all_leaves`). Errors: unreadable file, no alpha channel (alpha mode), no leaf pixels.
 pub fn measure_file_leaves(path: &Path, source: MaskSource, all_leaves: bool) -> Result<(Vec<Leaf>, MaskCheck), String> {
     let img = image::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
+    let source = source.resolve(&img);
     let raw = mask_from_image(&img, source).map_err(|e| format!("{}: {e}", path.display()))?;
     let empty = || format!("{}: no leaf pixels ({} mask)", path.display(), source.as_str());
     let grey_share = (source == MaskSource::Dark).then(|| grey_share(&img));
@@ -131,7 +134,7 @@ pub fn measure_file_leaves(path: &Path, source: MaskSource, all_leaves: bool) ->
         let (m, trace) = measure_traced(&raw).ok_or_else(empty)?;
         let p = trace.placement.as_ref().expect("raw input has a placement");
         let check = MaskCheck { dropped_share: p.dropped_share(), grey_share };
-        let leaf = Leaf { index: 1, centroid: [f64::NAN; 2], px: p.kept_px, measurement: m, trace };
+        let leaf = Leaf { index: 1, centroid: [f64::NAN; 2], px: p.kept_px, source, measurement: m, trace };
         return Ok((vec![leaf], check));
     }
     let total = raw.data.iter().filter(|v| **v).count();
@@ -145,7 +148,7 @@ pub fn measure_file_leaves(path: &Path, source: MaskSource, all_leaves: bool) ->
             p.crop[1] += region.offset[1];
             p.leaf_px = total;
         }
-        leaves.push(Leaf { index: i + 1, centroid: region.centroid, px: region.px, measurement: m, trace });
+        leaves.push(Leaf { index: i + 1, centroid: region.centroid, px: region.px, source, measurement: m, trace });
     }
     if leaves.is_empty() {
         return Err(empty());
@@ -155,7 +158,7 @@ pub fn measure_file_leaves(path: &Path, source: MaskSource, all_leaves: bool) ->
     Ok((leaves, check))
 }
 
-/// Measure one image file (largest region), with its mask check.
+/// Measure one image file (largest region), with its mask check. Use [`measure_file_leaves`] for the rule applied.
 pub fn measure_file(path: &Path, source: MaskSource) -> Result<(Measurement, Trace, MaskCheck), String> {
     let (mut leaves, check) = measure_file_leaves(path, source, false)?;
     let leaf = leaves.remove(0);
@@ -163,7 +166,7 @@ pub fn measure_file(path: &Path, source: MaskSource) -> Result<(Measurement, Tra
 }
 
 /// Header of the results table.
-pub const CSV_HEADER: &str = "file,EA,MC,elongation,petiole_len,sqrtA_native,EA_flag,MC_flag,version";
+pub const CSV_HEADER: &str = "file,EA,MC,elongation,petiole_len,sqrtA_native,EA_flag,MC_flag,mask_source,version";
 
 /// Optional columns of the results table (D116); the default has none.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -188,13 +191,21 @@ impl Columns {
 
     /// One row of the results table for a leaf of the image `file`.
     pub fn row(&self, file: &str, leaf: &Leaf) -> String {
-        self.row_of(file, leaf.index, leaf.centroid, leaf.px, &leaf.measurement)
+        self.row_of(file, leaf.index, leaf.centroid, leaf.px, leaf.source, &leaf.measurement)
     }
 
-    /// [`Columns::row`] from the parts of a leaf: number, centroid, pixels, values.
-    pub fn row_of(&self, file: &str, index: usize, centroid: [f64; 2], px: usize, m: &Measurement) -> String {
+    /// [`Columns::row`] from the parts of a leaf: number, centroid, pixels, rule applied, values.
+    pub fn row_of(
+        &self,
+        file: &str,
+        index: usize,
+        centroid: [f64; 2],
+        px: usize,
+        source: MaskSource,
+        m: &Measurement,
+    ) -> String {
         let area = self.px_per_mm.map(|k| px as f64 / (k * k));
-        table_row(file, m, self.leaves.then_some((index, centroid)), area)
+        table_row(file, m, source, self.leaves.then_some((index, centroid)), area)
     }
 }
 
@@ -206,12 +217,19 @@ fn num(v: f64) -> String {
     }
 }
 
-/// One row of the results table (default columns). Missing values are written as `NA`; numbers in full precision.
-pub fn csv_row(file: &str, m: &Measurement) -> String {
-    table_row(file, m, None, None)
+/// One row of the results table (default columns); `source` = the rule applied to the image. Missing values are
+/// written as `NA`; numbers in full precision.
+pub fn csv_row(file: &str, m: &Measurement, source: MaskSource) -> String {
+    table_row(file, m, source, None, None)
 }
 
-fn table_row(file: &str, m: &Measurement, leaf: Option<(usize, [f64; 2])>, area: Option<f64>) -> String {
+fn table_row(
+    file: &str,
+    m: &Measurement,
+    source: MaskSource,
+    leaf: Option<(usize, [f64; 2])>,
+    area: Option<f64>,
+) -> String {
     let mut f = vec![csv_field(file)];
     if let Some((i, c)) = leaf {
         f.extend([i.to_string(), num(c[0]), num(c[1])]);
@@ -220,7 +238,7 @@ fn table_row(file: &str, m: &Measurement, leaf: Option<(usize, [f64; 2])>, area:
     if let Some(a) = area {
         f.push(num(a));
     }
-    f.extend([m.ea_flag.as_str().to_string(), m.mc_flag.as_str().to_string(), VERSION.to_string()]);
+    f.extend([m.ea_flag.as_str(), m.mc_flag.as_str(), source.as_str(), VERSION].map(String::from));
     f.join(",")
 }
 

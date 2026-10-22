@@ -53,6 +53,7 @@ impl AnalysisEngine {
                     leaf: r.leaf,
                     centroid: r.centroid,
                     px: r.px,
+                    source: r.source,
                     measurement: r.measurement,
                     mask: PackedMask::from_classes(norm.cols, norm.rows, classes),
                     outline: r.outline_xy,

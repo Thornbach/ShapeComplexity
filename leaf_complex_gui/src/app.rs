@@ -72,7 +72,7 @@ impl LeafComplexApp {
             ui.menu_button("Analysis", |ui| {
                 let (ready, selected_count) = {
                     let g = self.state.lock().unwrap();
-                    (g.mask_source.is_some() && !g.analysis_in_progress && !g.batch_processing, g.selected_count())
+                    (!g.analysis_in_progress && !g.batch_processing, g.selected_count())
                 };
                 ui.add_enabled_ui(ready, |ui| {
                     if ui.button("▶ Analyze Current Image").clicked() {
@@ -89,9 +89,6 @@ impl LeafComplexApp {
                         ui.close_menu();
                     }
                 });
-                if !ready {
-                    ui.label("Choose the mask source first.");
-                }
             });
 
             ui.menu_button("Help", |ui| {
@@ -129,9 +126,10 @@ impl LeafComplexApp {
 
         let (image_path, source, all) = {
             let mut g = state.lock().unwrap();
-            let (Some(path), Some(source)) = (g.current_image().map(|i| i.path.clone()), g.mask_source) else {
+            let Some(path) = g.current_image().map(|i| i.path.clone()) else {
                 return;
             };
+            let source = g.mask_source;
             let all = g.all_leaves;
             g.analysis_in_progress = true;
             if let Some(img) = g.images.iter_mut().find(|i| i.path == path) {
@@ -159,7 +157,7 @@ impl LeafComplexApp {
 
         let (image_paths, source, all): (Vec<PathBuf>, _, _) = {
             let g = state.lock().unwrap();
-            let Some(source) = g.mask_source else { return };
+            let source = g.mask_source;
             let selected = g.get_selected_images();
             let paths = if selected.is_empty() { g.images.iter().map(|img| img.path.clone()).collect() } else { selected };
             (paths, source, g.all_leaves)
@@ -245,7 +243,7 @@ impl LeafComplexApp {
                 .iter()
                 .filter(|img| !selected || img.selected)
                 .filter_map(|img| g.analysis_results.get(&img.path).map(|v| (img, v)))
-                .flat_map(|(img, v)| v.iter().map(|r| cols.row_of(&img.label, r.leaf, r.centroid, r.px, &r.measurement)))
+                .flat_map(|(img, v)| v.iter().map(|r| cols.row_of(&img.label, r.leaf, r.centroid, r.px, r.source, &r.measurement)))
                 .collect();
             (rows, cols)
         };

@@ -26,9 +26,10 @@ enum Command {
         /// Image files or folders (png, jpg, jpeg, tif, tiff, bmp).
         #[arg(required = true)]
         inputs: Vec<PathBuf>,
-        /// Which pixels are leaf: `alpha` = opaque pixels of an image with a transparent background;
-        /// `dark` = dark pixels of a binary image (dark leaf on a light background). Required: there is no default.
-        #[arg(long, value_enum)]
+        /// Which pixels are leaf: `auto` = decide per image (alpha if it has transparent pixels, else dark);
+        /// `alpha` = opaque pixels of an image with a transparent background; `dark` = dark pixels of a binary image
+        /// (dark leaf on a light background). The rule applied is written to the column mask_source.
+        #[arg(long, value_enum, default_value = "auto")]
         mask_source: MaskSourceArg,
         /// Output CSV file (default: standard output).
         #[arg(short, long)]
@@ -60,6 +61,7 @@ enum Command {
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
 enum MaskSourceArg {
+    Auto,
     Alpha,
     Dark,
 }
@@ -67,6 +69,7 @@ enum MaskSourceArg {
 impl From<MaskSourceArg> for MaskSource {
     fn from(a: MaskSourceArg) -> Self {
         match a {
+            MaskSourceArg::Auto => MaskSource::Auto,
             MaskSourceArg::Alpha => MaskSource::Alpha,
             MaskSourceArg::Dark => MaskSource::Dark,
         }

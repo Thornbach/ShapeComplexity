@@ -164,9 +164,11 @@ pub fn load_dark_mask(path: &Path) -> Result<Mask, String> {
     load_mask(path, MaskSource::Dark)
 }
 
-/// Which pixels of an input image are leaf. There is no default: the user always says which rule applies.
+/// Which pixels of an input image are leaf.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MaskSource {
+    /// Decide per image (D117): `Alpha` if the image has some transparency (a pixel with alpha <= 127), else `Dark`.
+    Auto,
     /// Opaque pixels (alpha > 127) of an image with a transparent background, e.g. a cut-out.
     Alpha,
     /// Dark pixels (grey value < 128) of a binary image with a dark leaf on a light background.
@@ -176,19 +178,34 @@ pub enum MaskSource {
 impl MaskSource {
     pub fn as_str(&self) -> &'static str {
         match self {
+            MaskSource::Auto => "auto",
             MaskSource::Alpha => "alpha",
             MaskSource::Dark => "dark",
         }
     }
+
+    /// The rule applied to `img`: `Auto` resolved by the image's transparency, the others unchanged.
+    pub fn resolve(self, img: &image::DynamicImage) -> MaskSource {
+        match self {
+            MaskSource::Auto if has_transparency(img) => MaskSource::Alpha,
+            MaskSource::Auto => MaskSource::Dark,
+            s => s,
+        }
+    }
 }
 
-/// Leaf mask of a decoded image by the chosen rule.
+/// True if the image has an alpha channel and at least one pixel with alpha <= 127.
+pub fn has_transparency(img: &image::DynamicImage) -> bool {
+    img.color().has_alpha() && img.to_rgba8().pixels().any(|p| p.0[3] <= 127)
+}
+
+/// Leaf mask of a decoded image by the chosen rule (`Auto` resolved per image).
 pub fn mask_from_image(img: &image::DynamicImage, source: MaskSource) -> Result<Mask, String> {
-    match source {
+    match source.resolve(img) {
         MaskSource::Alpha => {
             alpha_mask(img).ok_or_else(|| "no alpha channel; the leaf must be the opaque part of the image".into())
         }
-        MaskSource::Dark => Ok(dark_mask(img)),
+        _ => Ok(dark_mask(img)),
     }
 }
 

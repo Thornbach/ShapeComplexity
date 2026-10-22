@@ -1,8 +1,8 @@
 // examples/screenshot.rs - renders the GUI on one analysed leaf and saves a screenshot. A development check of the
 // panels (no clicks needed, e.g. under Xvfb); not part of the application.
 //
-// Usage: cargo run --example screenshot -- <image or folder> <alpha|dark> <out.png> [band] [input] [all] [leaf=<n>] [zoom=<f>]
-//        [pan=<x>,<y>] [k=<n>] [mm=<px per mm>] [morpho]
+// Usage: cargo run --example screenshot -- <image or folder> <auto|alpha|dark> <out.png> [noband] [input] [all] [leaf=<n>] [zoom=<f>]
+//        [pan=<x>,<y>] [k=<n>] [mm=<px per mm>] [morpho] [empty]
 // A folder: every image in it is analysed; the first is shown.
 
 use std::path::PathBuf;
@@ -48,7 +48,11 @@ impl eframe::App for Shot {
 fn main() -> eframe::Result<()> {
     let args: Vec<String> = std::env::args().collect();
     let path = PathBuf::from(&args[1]);
-    let source = if args[2] == "dark" { MaskSource::Dark } else { MaskSource::Alpha };
+    let source = match args[2].as_str() {
+        "dark" => MaskSource::Dark,
+        "alpha" => MaskSource::Alpha,
+        _ => MaskSource::Auto,
+    };
     let out = PathBuf::from(&args[3]);
     let flag = |name: &str| args.iter().any(|a| a == name);
     let value = |name: &str| args.iter().find_map(|a| a.strip_prefix(&format!("{name}="))).map(String::from);
@@ -69,7 +73,7 @@ fn main() -> eframe::Result<()> {
     st.set_mask_source(source);
     st.set_all_leaves(flag("all"));
     let paths: Vec<PathBuf> = st.images.iter().map(|i| i.path.clone()).collect();
-    for p in &paths {
+    for p in paths.iter().filter(|_| !flag("empty")) {
         let result = AnalysisEngine::new().analyze_image(p, source, flag("all"));
         st.set_result(p, result);
     }
@@ -84,7 +88,7 @@ fn main() -> eframe::Result<()> {
         st.px_per_mm_text = mm.clone();
         st.px_per_mm = mm.parse().ok();
     }
-    st.show_band = flag("band");
+    st.show_band = !flag("noband");
     if flag("input") {
         st.view_mode = ViewMode::Input;
     }

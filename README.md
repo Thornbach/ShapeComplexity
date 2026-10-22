@@ -45,11 +45,12 @@ of √A, so the values do not depend on image resolution or leaf size.
 
 By default, one leaf per image: if there are several separate regions, the largest one is measured. With
 `--all-leaves` (GUI: *All leaves*), every region with √A ≥ 250 px is measured as a leaf, one row each, numbered in
-raster order; if no region is that large, the largest one is measured. You must say which pixels are leaf; there
-is no default:
+raster order; if no region is that large, the largest one is measured. Which pixels are leaf is decided per image
+(`auto`, the default) or forced:
 
 | `--mask-source` | Leaf pixels | Typical input |
 |---|---|---|
+| `auto` (default) | `alpha` if the image has an alpha channel with at least one transparent pixel (alpha ≤ 127), else `dark` | any of the below |
 | `alpha` | alpha > 127 (opaque) | cut-outs with a transparent background (PNG). Images without an alpha channel are refused. |
 | `dark` | grey value < 128; transparent pixels never count | binary masks with a dark leaf on a light background (PNG, JPEG, TIFF, BMP) |
 
@@ -66,10 +67,10 @@ command line prints them as `warning:` lines on standard error; the GUI lists th
 ## Command line
 
 ```bash
-# all images in a folder (add -r for subfolders), results to a CSV file
-shapecomplexity_cli measure leaves/ --mask-source alpha -o results.csv
+# all images in a folder (add -r for subfolders), results to a CSV file; mask source decided per image
+shapecomplexity_cli measure leaves/ -o results.csv
 
-# single files, binary masks
+# single files, forced to the dark rule (binary masks)
 shapecomplexity_cli measure leaf1.png leaf2.jpg --mask-source dark > results.csv
 ```
 
@@ -88,6 +89,7 @@ Files that fail are reported on standard error and left out of the table; the ex
 | `petiole_len` | petiole length / √A (0 = none found) |
 | `sqrtA_native` | √A of the leaf in the input image, px |
 | `EA_flag`, `MC_flag` | `ok`, `below_recommended` or `not_resolved` |
+| `mask_source` | the rule applied to the image: `alpha` or `dark` |
 | `version` | ShapeComplexity version |
 
 Optional columns: with `--all-leaves`, `leaf` (1, 2, …), `leaf_x` and `leaf_y` (centre of the region in input
@@ -103,8 +105,8 @@ implementation (see *Testing*).
 
 1. Start `leaf_complex_gui`.
 2. **File → Open Workspace** and choose a folder (subfolders are included).
-3. Choose the **mask source** in the toolbar.
-4. **▶ Analyze** (current image) or **⏩ Analyze All / Selected**.
+3. **▶ Analyze** (current image; also the large button in the empty view) or **⏩ Analyze All / Selected**.
+4. Optional: the mask source in the toolbar (*auto* by default; *alpha* or *dark* force a rule).
 5. **File → Export Results** writes one CSV with the same columns as the command line.
 
 *All leaves* and *px/mm* in the toolbar work as `--all-leaves` and `--px-per-mm`. With several leaves, pick one
