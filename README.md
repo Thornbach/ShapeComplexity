@@ -201,6 +201,7 @@ NumPy 1.26.4). The full check on 3,881 masks requires every value to agree with 
 
 Please cite the software (concept DOI [10.5281/zenodo.22113804](https://doi.org/10.5281/zenodo.22113804),
 or the version DOI of the release you used) and the accompanying paper. See [CITATION.cff](CITATION.cff).
+Version DOI of v2.0.0: [10.5281/zenodo.23689064](https://doi.org/10.5281/zenodo.23689064).
 
 ## License
 
