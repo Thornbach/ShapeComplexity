@@ -1,6 +1,6 @@
 # Changelog
 
-## 2.0.0 (unreleased; in work on branch `revision-v2`)
+## 2.0.0 (2026-10-27)
 
 v2.0.0 replaces the v1 method. The numbers of v1.0.0 cannot be reproduced with this version; use v1.0.0
 (Zenodo 10.5281/zenodo.22113805) for that.
